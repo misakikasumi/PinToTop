@@ -399,6 +399,11 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
       &decoder));
   wil::com_ptr<IWICBitmapFrameDecode> frame;
   THROW_IF_FAILED(decoder->GetFrame(0, &frame));
+  wil::com_ptr<IWICFormatConverter> converter;
+  THROW_IF_FAILED(factory->CreateFormatConverter(&converter));
+  THROW_IF_FAILED(converter->Initialize(
+      frame.get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+      nullptr, 0, WICBitmapPaletteTypeCustom));
   wil::com_ptr<IWICColorContext> src_context;
   THROW_IF_FAILED(factory->CreateColorContext(&src_context));
   UINT icc_count;
@@ -410,15 +415,15 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
   wil::com_ptr<IWICColorContext> dst_context;
   THROW_IF_FAILED(factory->CreateColorContext(&dst_context));
   THROW_IF_FAILED(dst_context->InitializeFromExifColorSpace(1));
-  wil::com_ptr<IWICColorTransform> converter;
-  THROW_IF_FAILED(factory->CreateColorTransformer(&converter));
-  THROW_IF_FAILED(converter->Initialize(frame.get(), src_context.get(),
-                                        dst_context.get(),
-                                        GUID_WICPixelFormat32bppBGRA));
+  wil::com_ptr<IWICColorTransform> transformer;
+  THROW_IF_FAILED(factory->CreateColorTransformer(&transformer));
+  THROW_IF_FAILED(transformer->Initialize(converter.get(), src_context.get(),
+                                          dst_context.get(),
+                                          GUID_WICPixelFormat32bppBGRA));
   wil::com_ptr<IWICBitmapScaler> scaled;
   THROW_IF_FAILED(factory->CreateBitmapScaler(&scaled));
   THROW_IF_FAILED(scaled->Initialize(
-      converter.get(), w, h, WICBitmapInterpolationModeHighQualityCubic));
+      transformer.get(), w, h, WICBitmapInterpolationModeHighQualityCubic));
   void *p_bits;
   wil::unique_hbitmap bitmap{create_dib(w, -h, &p_bits)};
   THROW_IF_FAILED(
