@@ -387,7 +387,7 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
   do {
     imgs.push_back(fd.cFileName);
   } while (FindNextFileW(sq.get(), &fd));*/
-  std::wstring found{match.substr(0, slash_pos + 1) + fd.cFileName};
+  const std::wstring found{match.substr(0, slash_pos + 1) + fd.cFileName};
   const WCHAR *found_path = found.c_str();
   wil::com_ptr<IWICImagingFactory> factory;
   THROW_IF_FAILED(
@@ -399,11 +399,22 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
       &decoder));
   wil::com_ptr<IWICBitmapFrameDecode> frame;
   THROW_IF_FAILED(decoder->GetFrame(0, &frame));
-  wil::com_ptr<IWICFormatConverter> converter;
-  THROW_IF_FAILED(factory->CreateFormatConverter(&converter));
-  THROW_IF_FAILED(converter->Initialize(
-      frame.get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
-      nullptr, 0, WICBitmapPaletteTypeCustom));
+  wil::com_ptr<IWICColorContext> src_context;
+  THROW_IF_FAILED(factory->CreateColorContext(&src_context));
+  UINT icc_count;
+  THROW_IF_FAILED(
+      frame->GetColorContexts(1, src_context.addressof(), &icc_count));
+  if (icc_count == 0) {
+    THROW_IF_FAILED(src_context->InitializeFromExifColorSpace(1));
+  }
+  wil::com_ptr<IWICColorContext> dst_context;
+  THROW_IF_FAILED(factory->CreateColorContext(&dst_context));
+  THROW_IF_FAILED(dst_context->InitializeFromExifColorSpace(1));
+  wil::com_ptr<IWICColorTransform> converter;
+  THROW_IF_FAILED(factory->CreateColorTransformer(&converter));
+  THROW_IF_FAILED(converter->Initialize(frame.get(), src_context.get(),
+                                        dst_context.get(),
+                                        GUID_WICPixelFormat32bppBGRA));
   wil::com_ptr<IWICBitmapScaler> scaled;
   THROW_IF_FAILED(factory->CreateBitmapScaler(&scaled));
   THROW_IF_FAILED(scaled->Initialize(
