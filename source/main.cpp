@@ -3,12 +3,12 @@
 #include <windows.h>
 
 #include <appmodel.h>
+#include <appxpackaging.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>
-#include <xmllite.h>
 
 #include <string>
 #include <vector>
@@ -50,7 +50,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
   hInst = hInstance;
 
-  CoInitialize(nullptr);
+  THROW_IF_FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
 
   load_resource();
   register_wndclass();
@@ -59,9 +59,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   return main_loop();
 }
 
+int get_iconsm_metric() { return GetSystemMetrics(SM_CXSMICON); }
+
 void load_resource() {
-  LoadStringW(hInst, IDS_APP_TITLE, app_title, MAX_LOADSTR);
-  LoadStringW(hInst, IDC_WNDCLASS, wnd_class, MAX_LOADSTR);
+  THROW_LAST_ERROR_IF(
+      LoadStringW(hInst, IDS_APP_TITLE, app_title, MAX_LOADSTR) == 0);
+  THROW_LAST_ERROR_IF(
+      LoadStringW(hInst, IDC_WNDCLASS, wnd_class, MAX_LOADSTR) == 0);
 }
 
 void register_wndclass() {
@@ -69,13 +73,14 @@ void register_wndclass() {
   wc.cbSize = sizeof(WNDCLASSEXW);
   wc.lpfnWndProc = WndProc;
   wc.hInstance = hInst;
-  wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_APP));
-  wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+  wc.hIcon =
+      THROW_LAST_ERROR_IF_NULL(LoadIconW(hInst, MAKEINTRESOURCEW(IDI_APP)));
+  wc.hCursor = THROW_LAST_ERROR_IF_NULL(LoadCursor(nullptr, IDC_ARROW));
   wc.hbrBackground = HBRUSH(COLOR_WINDOW + 1);
   wc.lpszClassName = wnd_class;
-  int cx = GetSystemMetrics(SM_CXSMICON);
-  wc.hIconSm =
-      HICON(LoadImage(hInst, MAKEINTRESOURCE(IDI_APP), IMAGE_ICON, cx, cx, 0));
+  const int cx = get_iconsm_metric();
+  wc.hIconSm = HICON(THROW_LAST_ERROR_IF_NULL(
+      LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, cx, cx, 0)));
   THROW_LAST_ERROR_IF(!RegisterClassExW(&wc));
 }
 
@@ -90,9 +95,9 @@ void init_tray() {
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   ncd.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
-  int cx = GetSystemMetrics(SM_CXSMICON);
-  ncd.hIcon =
-      HICON(LoadImage(hInst, MAKEINTRESOURCE(IDI_APP), IMAGE_ICON, cx, cx, 0));
+  const int cx = get_iconsm_metric();
+  ncd.hIcon = HICON(THROW_LAST_ERROR_IF_NULL(
+      LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, cx, cx, 0)));
   ncd.uVersion = NOTIFYICON_VERSION_4;
   ncd.uCallbackMessage = UM_TRAY;
   THROW_IF_FAILED(
@@ -108,16 +113,18 @@ void destroy_tray() {
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_DELETE, &ncd));
 }
 
-void notify(UINT title_id, UINT info_id) {
+void notify_error(UINT title_id, UINT info_id) {
   NOTIFYICONDATAW ncd{0};
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   ncd.uFlags = NIF_INFO | NIF_REALTIME;
-  LoadStringW(hInst, info_id, ncd.szInfo, sizeof(ncd.szInfo) / sizeof(WCHAR));
-  LoadStringW(hInst, title_id, ncd.szInfoTitle,
-              sizeof(ncd.szInfoTitle) / sizeof(WCHAR));
+  THROW_LAST_ERROR_IF(LoadStringW(hInst, info_id, ncd.szInfo,
+                                  sizeof(ncd.szInfo) / sizeof(WCHAR)) == 0);
+  THROW_LAST_ERROR_IF(LoadStringW(hInst, title_id, ncd.szInfoTitle,
+                                  sizeof(ncd.szInfoTitle) / sizeof(WCHAR)) ==
+                      0);
   ncd.dwInfoFlags = NIIF_ERROR | NIIF_LARGE_ICON;
-  Shell_NotifyIconW(NIM_MODIFY, &ncd);
+  THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_MODIFY, &ncd));
 }
 
 int main_loop() {
@@ -135,11 +142,9 @@ bool is_window_topmost(HWND wnd) {
 
 void show_menu() {
   WCHAR exit_str[MAX_LOADSTR];
-  LoadStringW(hInst, IDS_EXIT, exit_str, MAX_LOADSTR);
-
+  THROW_LAST_ERROR_IF(LoadStringW(hInst, IDS_EXIT, exit_str, MAX_LOADSTR) == 0);
   wil::unique_hmenu menu{CreatePopupMenu()};
   THROW_LAST_ERROR_IF_NULL(menu);
-
   auto wnds{get_app_windows()};
   UINT id = 1;
   for (auto wnd : wnds) {
@@ -185,10 +190,10 @@ void toggle_top(HWND wnd) {
     DWORD err = GetLastError();
     switch (err) {
     case 5:
-      notify(IDS_FAIL_INFOTITLE, IDS_WND_ACCESS_DENIED_INFO);
+      notify_error(IDS_FAIL_INFOTITLE, IDS_WND_ACCESS_DENIED_INFO);
       break;
     case 1400:
-      notify(IDS_FAIL_INFOTITLE, IDS_WND_CLOSED_INFO);
+      notify_error(IDS_FAIL_INFOTITLE, IDS_WND_CLOSED_INFO);
       break;
     default:
       THROW_WIN32(err);
@@ -210,14 +215,15 @@ bool is_app_window(HWND wnd) {
 
 std::vector<HWND> get_app_windows() {
   std::vector<HWND> wnds;
-  WNDENUMPROC cb{[](HWND wnd, LPARAM param) -> BOOL {
-    std::vector<HWND> &dsks = *(std::vector<HWND> *)(param);
-    if (is_app_window(wnd)) {
-      dsks.push_back(wnd);
-    }
-    return 1;
-  }};
-  EnumWindows(cb, LPARAM(&wnds));
+  EnumWindows(
+      [](HWND wnd, LPARAM param) -> BOOL {
+        std::vector<HWND> &dsks = *(std::vector<HWND> *)(param);
+        if (is_app_window(wnd)) {
+          dsks.push_back(wnd);
+        }
+        return TRUE;
+      },
+      LPARAM(&wnds));
   return wnds;
 }
 
@@ -249,18 +255,20 @@ HBITMAP get_uwp_icon(HWND wnd) {
     return nullptr;
   }
   DWORD real_pid = pid;
-  EnumChildWindows(wnd, WNDENUMPROC([](HWND wnd, LPARAM param) -> BOOL {
-                     auto p_real_pid = (DWORD *)param;
-                     DWORD pid;
-                     GetWindowThreadProcessId(wnd, &pid);
-                     if (pid != *p_real_pid) {
-                       *p_real_pid = pid;
-                       return FALSE;
-                     } else {
-                       return TRUE;
-                     }
-                   }),
-                   LPARAM(&real_pid));
+  EnumChildWindows(
+      wnd,
+      [](HWND wnd, LPARAM param) -> BOOL {
+        auto p_real_pid = (DWORD *)param;
+        DWORD pid;
+        GetWindowThreadProcessId(wnd, &pid);
+        if (pid != *p_real_pid) {
+          *p_real_pid = pid;
+          return FALSE;
+        } else {
+          return TRUE;
+        }
+      },
+      LPARAM(&real_pid));
   if (real_pid == pid) {
     return nullptr;
   }
@@ -284,29 +292,20 @@ HBITMAP get_uwp_icon(HWND wnd) {
   THROW_IF_FAILED(StringCchCatW(img_path, MAX_LOADSTR, L"\\"));
   wil::com_ptr<IStream> is;
   THROW_IF_FAILED(SHCreateStreamOnFileEx(path, STGM_READ, 0, 0, 0, &is));
-  wil::com_ptr<IXmlReader> rd;
-  THROW_IF_FAILED(CreateXmlReader(__uuidof(IXmlReader), (void **)&rd, nullptr));
-  THROW_IF_FAILED(rd->SetInput(is.get()));
-  bool in_logo = false, suc = false;
-  for (XmlNodeType nt; rd->Read(&nt) == S_OK;) {
-    if (nt == XmlNodeType_Element) {
-      WCHAR *local_name;
-      THROW_IF_FAILED(rd->GetLocalName((LPCWSTR *)&local_name, nullptr));
-      if (wcscmp(local_name, L"Logo") == 0) {
-        in_logo = true;
-      }
-    } else if (in_logo && nt == XmlNodeType_Text) {
-      WCHAR *value;
-      THROW_IF_FAILED(rd->GetValue((LPCWSTR *)&value, nullptr));
-      StringCchCatW(img_path, MAX_LOADSTR, value);
-      suc = true;
-      break;
-    }
-  }
-  if (!suc) {
-    return nullptr;
-  }
-  int cx = GetSystemMetrics(SM_CXSMICON);
+  wil::com_ptr<IAppxFactory> factory;
+  THROW_IF_FAILED(CoCreateInstance(CLSID_AppxFactory, nullptr,
+                                   CLSCTX_INPROC_SERVER, __uuidof(IAppxFactory),
+                                   (void **)&factory));
+  wil::com_ptr<IAppxManifestReader> reader;
+  THROW_IF_FAILED(factory->CreateManifestReader(is.get(), &reader));
+  wil::com_ptr<IAppxManifestApplicationsEnumerator> iter;
+  THROW_IF_FAILED(reader->GetApplications(&iter));
+  wil::com_ptr<IAppxManifestApplication> app;
+  THROW_IF_FAILED(iter->GetCurrent(&app));
+  WCHAR *logo;
+  THROW_IF_FAILED(app->GetStringValue(L"Square44x44Logo", &logo));
+  THROW_IF_FAILED(StringCchCatW(img_path, MAX_LOADSTR, logo));
+  int cx = get_iconsm_metric();
   return load_img(img_path, cx, cx);
 }
 
@@ -318,7 +317,7 @@ HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
   header.bV5Planes = 1;
   header.bV5BitCount = 32;
   header.bV5Compression = BI_RGB;
-  header.bV5CSType = LCS_WINDOWS_COLOR_SPACE;
+  header.bV5CSType = LCS_sRGB;
   header.bV5Intent = LCS_GM_GRAPHICS;
   return CreateDIBSection(nullptr, (BITMAPINFO *)&header, DIB_RGB_COLORS,
                           pp_bits, nullptr, 0);
@@ -327,7 +326,7 @@ HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
 HBITMAP icon_to_bitmap(HICON icon) {
   wil::unique_hdc_window hdc{GetDC(nullptr)};
   wil::unique_hdc hMemDC{CreateCompatibleDC(hdc.get())};
-  int cx = GetSystemMetrics(SM_CXSMICON);
+  const int cx = get_iconsm_metric();
   HBITMAP hBitmap = create_dib(cx, cx);
   wil::unique_hgdiobj hOrgBmp{SelectObject(hMemDC.get(), hBitmap)};
   THROW_IF_WIN32_BOOL_FALSE(
@@ -363,13 +362,15 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
   match.insert(dot_pos, L"*");
   WIN32_FIND_DATAW fd;
   wil::unique_handle sh{FindFirstFileW(match.c_str(), &fd)};
-  THROW_LAST_ERROR_IF_NULL(sh);
+  if (!sh.is_valid()) {
+    return nullptr;
+  }
   wil::unique_hfind sq{sh.release()};
-  std::vector<std::wstring> imgs;
+  /*std::vector<std::wstring> imgs;
   do {
     imgs.push_back(fd.cFileName);
-  } while (FindNextFileW(sq.get(), &fd));
-  std::wstring found{match.substr(0, slash_pos + 1) + imgs.at(0)};
+  } while (FindNextFileW(sq.get(), &fd));*/
+  std::wstring found{match.substr(0, slash_pos + 1) + fd.cFileName};
   const WCHAR *found_path = found.c_str();
   wil::com_ptr<IWICImagingFactory> factory;
   THROW_IF_FAILED(
@@ -377,7 +378,7 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
                        __uuidof(IWICImagingFactory), (void **)&factory));
   wil::com_ptr<IWICBitmapDecoder> decoder;
   THROW_IF_FAILED(factory->CreateDecoderFromFilename(
-      found_path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad,
+      found_path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand,
       &decoder));
   wil::com_ptr<IWICBitmapFrameDecode> frame;
   THROW_IF_FAILED(decoder->GetFrame(0, &frame));
