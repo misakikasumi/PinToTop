@@ -6,6 +6,7 @@
 #include <appxpackaging.h>
 #include <shellapi.h>
 #include <shlwapi.h>
+#include <shobjidl_core.h>
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>
@@ -25,6 +26,9 @@ HINSTANCE hInst;
 HWND hWnd;
 WCHAR app_title[MAX_LOADSTR];
 WCHAR wnd_class[MAX_LOADSTR];
+constexpr CLSID CLSID_ImmersiveShell = {
+    0xC2F03A33, 0x21F5, 0x47FA, 0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39};
+IVirtualDesktopManager *vdm;
 
 void load_resource();
 void register_wndclass();
@@ -39,6 +43,7 @@ HBITMAP get_uwp_icon(HWND);
 HBITMAP icon_to_bitmap(HICON);
 int main_loop();
 HBITMAP load_img(const WCHAR *path, int w, int h);
+void init_vdm();
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -56,6 +61,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   register_wndclass();
   make_window();
   init_tray();
+  init_vdm();
   return main_loop();
 }
 
@@ -202,15 +208,26 @@ void toggle_top(HWND wnd) {
   }
 }
 
+void init_vdm() {
+  wil::com_ptr<IServiceProvider> sp;
+  THROW_IF_FAILED(CoCreateInstance(CLSID_ImmersiveShell, nullptr,
+                                   CLSCTX_LOCAL_SERVER,
+                                   __uuidof(IServiceProvider), (void **)&sp));
+  THROW_IF_FAILED(sp->QueryService(__uuidof(IVirtualDesktopManager), &vdm));
+}
+
 bool is_app_window(HWND wnd) {
   LONG ex_sty = GetWindowLongW(wnd, GWL_EXSTYLE);
   WCHAR wnd_class[MAX_LOADSTR];
   wnd_class[RealGetWindowClassW(wnd, wnd_class, MAX_LOADSTR)] = 0;
-  return IsWindowVisible(wnd) &&
-         ((ex_sty & WS_EX_APPWINDOW) ||
-          (!GetWindow(wnd, GW_OWNER) && !(ex_sty & WS_EX_NOACTIVATE) &&
-           !(ex_sty & WS_EX_TOOLWINDOW) && GetWindowTextLengthW(wnd) &&
-           wcscmp(wnd_class, L"Windows.UI.Core.CoreWindow")));
+  bool is_app = IsWindowVisible(wnd) &&
+                ((ex_sty & WS_EX_APPWINDOW) ||
+                 (!GetWindow(wnd, GW_OWNER) && !(ex_sty & WS_EX_NOACTIVATE) &&
+                  !(ex_sty & WS_EX_TOOLWINDOW) && GetWindowTextLengthW(wnd) &&
+                  wcscmp(wnd_class, L"Windows.UI.Core.CoreWindow")));
+  BOOL is_on_current_vd;
+  THROW_IF_FAILED(vdm->IsWindowOnCurrentVirtualDesktop(wnd, &is_on_current_vd));
+  return is_app && is_on_current_vd;
 }
 
 std::vector<HWND> get_app_windows() {
