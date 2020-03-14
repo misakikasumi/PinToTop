@@ -384,8 +384,8 @@ HBITMAP load_img(const WCHAR *path, int w, int h) {
   wil::com_ptr<IWICFormatConverter> converter;
   THROW_IF_FAILED(factory->CreateFormatConverter(&converter));
   THROW_IF_FAILED(converter->Initialize(
-      frame.get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeSpiral4x4,
-      nullptr, 0, WICBitmapPaletteTypeMedianCut));
+      frame.get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+      nullptr, 0, WICBitmapPaletteTypeCustom));
   wil::com_ptr<IWICBitmapScaler> scaled;
   THROW_IF_FAILED(factory->CreateBitmapScaler(&scaled));
   THROW_IF_FAILED(scaled->Initialize(
