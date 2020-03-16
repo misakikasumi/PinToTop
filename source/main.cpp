@@ -445,6 +445,24 @@ HBITMAP get_uwp_icon(HWND wnd) {
             return false;
           }
         }
+        lc = lm.find(L"theme");
+        rc = rm.find(L"theme");
+        if (lc != lm.end() && rc == rm.end()) {
+          return true;
+        }
+        if (lc == lm.end() && rc != rm.end()) {
+          return false;
+        }
+        if (lc != lm.end() && rc != rm.end()) {
+          if (lc->second == L"light" &&
+              rc->second != L"light") {
+            return true;
+          }
+          if (lc->second != L"light" &&
+              rc->second == L"light") {
+            return false;
+          }
+        }
         lc = lm.find(L"targetsize");
         rc = rm.find(L"targetsize");
         if (lc != lm.end() && rc == rm.end()) {
