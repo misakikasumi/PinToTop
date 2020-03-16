@@ -534,15 +534,18 @@ HBITMAP icon_to_bitmap(HICON icon) {
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
                          LPARAM lParam) {
+  static bool menu_showing = false;
   switch (message) {
   case UM_TRAY:
-    if (lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) {
+    if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) && !menu_showing) {
       try {
+        menu_showing = true;
         show_menu();
+        menu_showing = false;
       } catch (const std::exception &exc) {
         CHAR fatal_title[MAX_LOADSTR];
         LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
-        MessageBoxA(nullptr, exc.what(), fatal_title, MB_ICONERROR);
+        MessageBoxA(hWnd, exc.what(), fatal_title, MB_ICONERROR|MB_SYSTEMMODAL);
         throw;
       }
     }
