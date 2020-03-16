@@ -43,6 +43,7 @@ BEGIN
     IDS_WND_CLOSED_INFO     "The target window has closed."
     IDS_WND_ACCESS_DENIED_INFO
                             "Access denied. Maybe because the target window is created as administrator. You can run Pin To Top as administrator and try again."
+    IDS_FATAL_MSGBOX_TITLE  "Fatal - Pin To Top"
 END
 
 #endif    // English (United States) resources

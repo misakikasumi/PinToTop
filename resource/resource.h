@@ -9,3 +9,4 @@
 #define IDS_FAIL_INFOTITLE              104
 #define IDS_WND_CLOSED_INFO             105
 #define IDS_WND_ACCESS_DENIED_INFO      106
+#define IDS_FATAL_MSGBOX_TITLE          107

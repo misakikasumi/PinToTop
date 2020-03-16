@@ -4,6 +4,7 @@
 
 #include <appmodel.h>
 #include <appxpackaging.h>
+#include <comdef.h>
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shobjidl_core.h>
@@ -536,7 +537,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
   switch (message) {
   case UM_TRAY:
     if (lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) {
-      show_menu();
+      try {
+        show_menu();
+      } catch (const std::exception &exc) {
+        CHAR fatal_title[MAX_LOADSTR];
+        LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
+        MessageBoxA(nullptr, exc.what(), fatal_title, MB_ICONERROR);
+        throw;
+      }
     }
     break;
   case WM_DESTROY:
