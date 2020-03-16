@@ -1,5 +1,5 @@
 #include <sdkddkver.h>
-#define WIN32_LEAN_AND_MEAN
+
 #include <windows.h>
 
 #include <appmodel.h>
@@ -11,7 +11,11 @@
 #include <strsafe.h>
 #include <wincodec.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "wil/com.h"
@@ -257,6 +261,32 @@ HICON get_window_icon(HWND wnd) {
   return icon;
 }
 
+void parse_modifiers(std::wstring_view s,
+                     std::unordered_map<std::wstring, std::wstring> &mod) {
+  bool finished = false;
+  while (!finished) {
+    auto delimiter = s.find(L"_");
+    std::wstring_view sub{s};
+    if (delimiter != std::wstring::npos) {
+      sub = sub.substr(0, delimiter);
+      s = s.substr(delimiter + 1);
+    } else {
+      finished = true;
+    }
+    auto pos = sub.find(L"-");
+    if (pos == std::wstring_view::npos) {
+      return;
+    }
+    std::wstring name{sub.substr(0, pos)};
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](wchar_t ch) { return towlower(ch); });
+    std::wstring value{sub.substr(pos + 1)};
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](wchar_t ch) { return towlower(ch); });
+    mod[name] = value;
+  }
+}
+
 HBITMAP get_uwp_icon(HWND wnd) {
   DWORD pid;
   GetWindowThreadProcessId(wnd, &pid);
@@ -301,14 +331,15 @@ HBITMAP get_uwp_icon(HWND wnd) {
     THROW_IF_WIN32_ERROR(r);
   auto pkg_id = (PACKAGE_ID *)&pkg_id_buf[0];
   WCHAR path[MAX_LOADSTR];
-  WCHAR img_path[MAX_LOADSTR];
+  WCHAR manifest_path[MAX_LOADSTR];
   buflen = MAX_LOADSTR;
   THROW_IF_WIN32_ERROR(GetPackagePath(pkg_id, 0, &buflen, path));
-  THROW_IF_FAILED(StringCchCopyW(img_path, MAX_LOADSTR, path));
-  THROW_IF_FAILED(StringCchCatW(path, MAX_LOADSTR, L"\\AppxManifest.xml"));
-  THROW_IF_FAILED(StringCchCatW(img_path, MAX_LOADSTR, L"\\"));
+  THROW_IF_FAILED(StringCchCopyW(manifest_path, MAX_LOADSTR, path));
+  THROW_IF_FAILED(
+      StringCchCatW(manifest_path, MAX_LOADSTR, L"\\AppxManifest.xml"));
   wil::com_ptr<IStream> is;
-  THROW_IF_FAILED(SHCreateStreamOnFileEx(path, STGM_READ, 0, 0, 0, &is));
+  THROW_IF_FAILED(
+      SHCreateStreamOnFileEx(manifest_path, STGM_READ, 0, 0, 0, &is));
   wil::com_ptr<IAppxFactory> factory;
   THROW_IF_FAILED(CoCreateInstance(CLSID_AppxFactory, nullptr,
                                    CLSCTX_INPROC_SERVER, __uuidof(IAppxFactory),
@@ -321,9 +352,139 @@ HBITMAP get_uwp_icon(HWND wnd) {
   THROW_IF_FAILED(iter->GetCurrent(&app));
   WCHAR *logo;
   THROW_IF_FAILED(app->GetStringValue(L"Square44x44Logo", &logo));
-  THROW_IF_FAILED(StringCchCatW(img_path, MAX_LOADSTR, logo));
+  std::filesystem::path img_path{std::wstring(path) + L"\\" + logo};
+  auto logo_stw{img_path.stem().native() + L"."};
+  auto folder_path{img_path.parent_path()};
+  std::vector<std::pair<std::filesystem::path,
+                        std::unordered_map<std::wstring, std::wstring>>>
+      candidates;
+  for (auto file : std::filesystem::recursive_directory_iterator{folder_path}) {
+    if (file.is_regular_file() &&
+        std::wstring_view{file.path().filename().native()}.substr(
+            0, logo_stw.size()) == logo_stw) {
+      std::filesystem::path loc{
+          file.path().native().substr(folder_path.native().size() + 1)};
+      candidates.push_back({file.path().native(), {}});
+      auto &modifiers = candidates.back().second;
+      for (auto it{loc.begin()}; it != loc.end(); ++it) {
+        auto it2{it};
+        if (++it2 == loc.end()) {
+          break;
+        }
+        parse_modifiers(it->native(), modifiers);
+      }
+      auto stem{loc.stem()};
+      if (stem.has_extension()) {
+        parse_modifiers(std::wstring_view{stem.extension().native()}.substr(1),
+                        modifiers);
+      }
+    }
+  }
+
+  HIGHCONTRASTW hc;
+  hc.cbSize = sizeof(HIGHCONTRASTW);
+  SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(HIGHCONTRASTW), (void *)&hc,
+                        0);
+  int hc_mode;
+  if (hc.dwFlags & HCF_HIGHCONTRASTON) {
+    if (wcsstr(hc.lpszDefaultScheme, L"White") != nullptr) {
+      hc_mode = 2;
+    } else {
+      hc_mode = 1;
+    }
+  } else {
+    hc_mode = 0;
+  }
+
   int cx = get_iconsm_metric();
-  return load_img(img_path, cx, cx);
+
+  auto best{std::min_element(
+      candidates.begin(), candidates.end(),
+      [hc_mode, cx](const auto &left, const auto &right) {
+        const auto &lm{left.second}, &rm{right.second};
+        auto lc{lm.find(L"contrast")}, rc{rm.find(L"contrast")};
+        if (hc_mode == 1 && lc != lm.end() && lc->second == L"black" &&
+            (rc == rm.end() || rc->second != L"black")) {
+          return true;
+        }
+        if (hc_mode == 1 && rc != rm.end() && rc->second == L"black" &&
+            (lc == lm.end() || lc->second != L"black")) {
+          return false;
+        }
+        if (hc_mode == 2 && lc != lm.end() && lc->second == L"white" &&
+            (rc == rm.end() || rc->second != L"white")) {
+          return true;
+        }
+        if (hc_mode == 2 && rc != rm.end() && rc->second == L"white" &&
+            (lc == lm.end() || lc->second != L"white")) {
+          return false;
+        }
+        if (hc_mode == 0 && (lc == lm.end() || lc->second == L"standard") &&
+            rc != rm.end() && rc->second != L"standard") {
+          return true;
+        }
+        if (hc_mode == 0 && (rc == rm.end() || rc->second == L"standard") &&
+            lc != lm.end() && lc->second != L"standard") {
+          return false;
+        }
+        lc = lm.find(L"altform");
+        rc = rm.find(L"altform");
+        if (lc != lm.end() && rc == rm.end()) {
+          return true;
+        }
+        if (lc == lm.end() && rc != rm.end()) {
+          return false;
+        }
+        if (lc != lm.end() && rc != rm.end()) {
+          if (lc->second == L"lightunplated" &&
+              rc->second != L"lightunplated") {
+            return true;
+          }
+          if (lc->second != L"lightunplated" &&
+              rc->second == L"lightunplated") {
+            return false;
+          }
+        }
+        lc = lm.find(L"targetsize");
+        rc = rm.find(L"targetsize");
+        if (lc != lm.end() && rc == rm.end()) {
+          return true;
+        }
+        if (lc == lm.end() && rc != rm.end()) {
+          return false;
+        }
+        if (lc != lm.end() && rc != rm.end()) {
+          int lx = std::stoi(lc->second);
+          int rx = std::stoi(rc->second);
+          if (lx >= cx && rx < cx) {
+            return true;
+          }
+          if (lx < cx && rx >= cx) {
+            return false;
+          }
+          int ld = lx - cx;
+          int rd = rx - cx;
+          ld = ld < 0 ? -ld : ld;
+          rd = rd < 0 ? -rd : rd;
+          return ld < rd;
+        }
+        lc = lm.find(L"scale");
+        rc = rm.find(L"scale");
+        if (lc != lm.end() && rc == rm.end()) {
+          return true;
+        }
+        if (lc == lm.end() && rc != rm.end()) {
+          return false;
+        }
+        if (lc != lm.end() && rc != rm.end()) {
+          int lx = std::stoi(lc->second);
+          int rx = std::stoi(rc->second);
+          return lx < rx;
+        }
+        return false;
+      })};
+
+  return load_img(best->first.c_str(), cx, cx);
 }
 
 HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
@@ -371,32 +532,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
 }
 
 HBITMAP load_img(const WCHAR *path, int w, int h) {
-  std::wstring match(path);
-  size_t dot_pos = match.rfind(L'.');
-  THROW_HR_IF(E_INVALIDARG, dot_pos == std::wstring::npos);
-  size_t slash_pos = match.rfind(L'\\');
-  THROW_HR_IF(E_INVALIDARG, slash_pos == std::wstring::npos);
-  match.insert(dot_pos, L"*");
-  WIN32_FIND_DATAW fd;
-  wil::unique_handle sh{FindFirstFileW(match.c_str(), &fd)};
-  if (!sh.is_valid()) {
-    return nullptr;
-  }
-  wil::unique_hfind sq{sh.release()};
-  /*std::vector<std::wstring> imgs;
-  do {
-    imgs.push_back(fd.cFileName);
-  } while (FindNextFileW(sq.get(), &fd));*/
-  const std::wstring found{match.substr(0, slash_pos + 1) + fd.cFileName};
-  const WCHAR *found_path = found.c_str();
   wil::com_ptr<IWICImagingFactory> factory;
   THROW_IF_FAILED(
       CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                        __uuidof(IWICImagingFactory), (void **)&factory));
   wil::com_ptr<IWICBitmapDecoder> decoder;
   THROW_IF_FAILED(factory->CreateDecoderFromFilename(
-      found_path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand,
-      &decoder));
+      path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
   wil::com_ptr<IWICBitmapFrameDecode> frame;
   THROW_IF_FAILED(decoder->GetFrame(0, &frame));
   wil::com_ptr<IWICFormatConverter> converter;
