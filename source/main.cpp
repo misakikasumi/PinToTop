@@ -262,7 +262,7 @@ HICON get_window_icon(HWND wnd) {
   return icon;
 }
 
-void parse_modifiers(std::wstring_view s,
+bool parse_modifiers(std::wstring_view s,
                      std::unordered_map<std::wstring, std::wstring> &mod) {
   bool finished = false;
   while (!finished) {
@@ -276,7 +276,7 @@ void parse_modifiers(std::wstring_view s,
     }
     auto pos = sub.find(L"-");
     if (pos == std::wstring_view::npos) {
-      return;
+      return false;
     }
     std::wstring name{sub.substr(0, pos)};
     std::transform(name.begin(), name.end(), name.begin(),
@@ -286,6 +286,7 @@ void parse_modifiers(std::wstring_view s,
                    [](wchar_t ch) { return towlower(ch); });
     mod[name] = value;
   }
+  return true;
 }
 
 HBITMAP get_uwp_icon(HWND wnd) {
@@ -365,21 +366,32 @@ HBITMAP get_uwp_icon(HWND wnd) {
             0, logo_stw.size()) == logo_stw) {
       std::filesystem::path loc{
           file.path().native().substr(folder_path.native().size() + 1)};
-      candidates.push_back({file.path().native(), {}});
-      auto &modifiers = candidates.back().second;
+      std::unordered_map<std::wstring, std::wstring> modifiers;
+      bool valid = true;
       for (auto it{loc.begin()}; it != loc.end(); ++it) {
         auto it2{it};
         if (++it2 == loc.end()) {
           break;
         }
-        parse_modifiers(it->native(), modifiers);
+        if (!parse_modifiers(it->native(), modifiers)) {
+          valid = false;
+          break;
+        }
       }
       auto stem{loc.stem()};
-      if (stem.has_extension()) {
-        parse_modifiers(std::wstring_view{stem.extension().native()}.substr(1),
-                        modifiers);
+      if (valid && stem.has_extension()) {
+        if(!parse_modifiers(std::wstring_view{stem.extension().native()}.substr(1),
+                        modifiers)) {
+                          valid = false;
+                        }
+      }
+      if (valid) {
+        candidates.push_back({file.path().native(), std::move(modifiers)});
       }
     }
+  }
+  if (candidates.empty()) {
+    return nullptr;
   }
 
   HIGHCONTRASTW hc;
