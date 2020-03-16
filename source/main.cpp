@@ -25,7 +25,7 @@
 
 #include "resource.h"
 
-constexpr int MAX_LOADSTR = 128;
+constexpr int MAX_LOADSTR = 260;
 constexpr UINT UM_TRAY = WM_USER + 1;
 HINSTANCE hInst;
 HWND hWnd;
