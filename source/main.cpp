@@ -499,7 +499,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
           int rx = std::stoi(rc->second);
           return lx < rx;
         }
-        return false;
+        return lm.size() < rm.size();
       })};
 
   return load_img(best->first.c_str(), cx, cx);
