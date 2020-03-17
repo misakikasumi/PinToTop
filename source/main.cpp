@@ -40,6 +40,7 @@ void register_wndclass();
 void make_window();
 void init_tray();
 void destroy_tray();
+void init_hotkey();
 void show_menu();
 void toggle_top(HWND wnd);
 std::vector<HWND> get_app_windows();
@@ -67,6 +68,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   make_window();
   init_tray();
   init_vdm();
+  init_hotkey();
   return main_loop();
 }
 
@@ -136,6 +138,10 @@ void notify_error(UINT title_id, UINT info_id) {
                       0);
   ncd.dwInfoFlags = NIIF_ERROR | NIIF_LARGE_ICON;
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_MODIFY, &ncd));
+}
+
+void init_hotkey() {
+  RegisterHotKey(hWnd, 0, MOD_CONTROL|MOD_ALT, 0x54);
 }
 
 int main_loop() {
@@ -562,6 +568,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
       }
     }
     break;
+  case WM_HOTKEY: {
+    HWND foreground = GetForegroundWindow();
+    if (foreground) {
+      for (HWND owner; (owner = GetWindow(foreground, GW_OWNER)); foreground = owner);
+      if (is_app_window(foreground)) {
+        toggle_top(foreground);
+      }
+    }
+    break;
+  }
   case WM_DESTROY:
     PostQuitMessage(0);
     destroy_tray();
