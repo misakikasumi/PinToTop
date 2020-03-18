@@ -18,20 +18,20 @@
     <ClInclude Include="resource/resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="source/main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
     <ResourceCompile Include="resource/resource.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
-  </ItemGroup>
-  <ItemGroup>
     <Image Include="resource/app.ico">
       <Filter>Resource Files</Filter>
     </Image>
+    <ClInclude Include="source/pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClCompile Include="source/pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
