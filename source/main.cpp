@@ -1,12 +1,16 @@
 #include "pch.h"
 #include "resource.h"
+using namespace winrt;
 
 constexpr int MAX_LOADSTR = 260;
 constexpr UINT UM_TRAY = WM_USER + 1;
 HINSTANCE hInst;
-HWND hWnd;
+HWND hWnd, hMenu;
 WCHAR app_title[MAX_LOADSTR];
 WCHAR wnd_class[MAX_LOADSTR];
+
+Windows::UI::Xaml::Controls::TextBlock anchor{nullptr};
+Windows::UI::Xaml::Controls::MenuFlyout menu_flyout{nullptr};
 
 void load_resource();
 void register_wndclass();
@@ -14,6 +18,7 @@ void make_window();
 void init_tray();
 void destroy_tray();
 void init_hotkey();
+void init_island();
 void show_menu();
 void toggle_top(HWND wnd);
 std::vector<HWND> get_app_windows();
@@ -33,13 +38,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
   hInst = hInstance;
 
-  THROW_IF_FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
-
+  init_apartment();
   load_resource();
   register_wndclass();
   make_window();
   init_tray();
   init_hotkey();
+  init_island();
   return main_loop();
 }
 
@@ -53,7 +58,7 @@ void load_resource() {
 }
 
 void register_wndclass() {
-  WNDCLASSEXW wc{0};
+  WNDCLASSEXW wc{};
   wc.cbSize = sizeof(WNDCLASSEXW);
   wc.lpfnWndProc = WndProc;
   wc.hInstance = hInst;
@@ -72,10 +77,12 @@ void make_window() {
   THROW_LAST_ERROR_IF_NULL(hWnd = CreateWindowW(wnd_class, app_title, 0, 0, 0,
                                                 0, 0, HWND_MESSAGE, nullptr,
                                                 hInst, nullptr));
+  THROW_LAST_ERROR_IF_NULL(hMenu = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class, app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
+  THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
 }
 
 void init_tray() {
-  NOTIFYICONDATAW ncd{0};
+  NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   ncd.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
@@ -91,14 +98,14 @@ void init_tray() {
 }
 
 void destroy_tray() {
-  NOTIFYICONDATAW ncd{0};
+  NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_DELETE, &ncd));
 }
 
 void notify_error(UINT title_id, UINT info_id) {
-  NOTIFYICONDATAW ncd{0};
+  NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   ncd.uFlags = NIF_INFO | NIF_REALTIME;
@@ -112,6 +119,24 @@ void notify_error(UINT title_id, UINT info_id) {
 }
 
 void init_hotkey() { RegisterHotKey(hWnd, 0, MOD_CONTROL | MOD_ALT, 0x54); }
+
+void init_island() {
+  static Windows::UI::Xaml::Hosting::WindowsXamlManager xaml_manager{nullptr};
+  static Windows::UI::Xaml::Hosting::DesktopWindowXamlSource desktop_source{nullptr};
+  xaml_manager = Windows::UI::Xaml::Hosting::WindowsXamlManager::InitializeForCurrentThread();
+  desktop_source = Windows::UI::Xaml::Hosting::DesktopWindowXamlSource{};
+  auto interop = desktop_source.as <IDesktopWindowXamlSourceNative>();
+  THROW_IF_FAILED(interop->AttachToWindow(hMenu));
+  HWND hIsland;
+  THROW_IF_FAILED(interop->get_WindowHandle(&hIsland));
+  SetWindowPos(hIsland, 0, 0, 0, 0, 0, SWP_SHOWWINDOW);
+  anchor = Windows::UI::Xaml::Controls::TextBlock{};
+  desktop_source.Content(anchor);
+  menu_flyout = Windows::UI::Xaml::Controls::MenuFlyout {};
+  menu_flyout.Placement(Windows::UI::Xaml::Controls::Primitives::
+                            FlyoutPlacementMode::TopEdgeAlignedLeft);
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(anchor, menu_flyout);
+}
 
 int main_loop() {
   MSG msg;
@@ -129,16 +154,20 @@ bool is_window_topmost(HWND wnd) {
 void show_menu() {
   WCHAR exit_str[MAX_LOADSTR];
   THROW_LAST_ERROR_IF(LoadStringW(hInst, IDS_EXIT, exit_str, MAX_LOADSTR) == 0);
-  wil::unique_hmenu menu{CreatePopupMenu()};
-  THROW_LAST_ERROR_IF_NULL(menu);
+  menu_flyout.Items().Clear();
   auto wnds{get_app_windows()};
   UINT id = 1;
   for (auto wnd : wnds) {
     WCHAR wnd_text[MAX_LOADSTR];
     wnd_text[GetWindowTextW(wnd, wnd_text, MAX_LOADSTR)] = 0;
-    THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(
-        menu.get(), is_window_topmost(wnd) ? MF_CHECKED : 0, id, wnd_text));
-    HBITMAP bitmap = get_uwp_icon(wnd);
+    //THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(
+    //    menu.get(), is_window_topmost(wnd) ? MF_CHECKED : 0, id, wnd_text));
+    Windows::UI::Xaml::Controls::ToggleMenuFlyoutItem item;
+    item.Text(wnd_text);
+    item.IsChecked(is_window_topmost(wnd));
+    item.Click([wnd](Windows::Foundation::IInspectable const&, Windows::UI::Xaml::RoutedEventArgs const&){toggle_top(wnd);});
+    menu_flyout.Items().Append(item);
+    /*HBITMAP bitmap = get_uwp_icon(wnd);
     if (!bitmap) {
       HICON icon = get_window_icon(wnd);
       if (icon) {
@@ -146,20 +175,25 @@ void show_menu() {
       }
     }
     if (bitmap) {
-      MENUITEMINFOW mii{0};
+      MENUITEMINFOW mii{};
       mii.cbSize = sizeof(mii);
       mii.fMask = MIIM_CHECKMARKS;
       mii.hbmpUnchecked = bitmap;
       THROW_IF_WIN32_BOOL_FALSE(SetMenuItemInfoW(menu.get(), id, FALSE, &mii));
-    }
+    }*/
     ++id;
   }
-  THROW_IF_WIN32_BOOL_FALSE(
+  /*THROW_IF_WIN32_BOOL_FALSE(
       AppendMenuW(menu.get(), MF_SEPARATOR, id + 1, nullptr));
-  THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(menu.get(), 0, id, exit_str));
+  THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(menu.get(), 0, id, exit_str));*/
+  menu_flyout.Items().Append(Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
+  Windows::UI::Xaml::Controls::MenuFlyoutItem exit_item;
+  exit_item.Text(exit_str);
+  exit_item.Click([](Windows::Foundation::IInspectable const&, Windows::UI::Xaml::RoutedEventArgs const&){DestroyWindow(hWnd);});
+  menu_flyout.Items().Append(exit_item);
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
-  THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hWnd));
+  /*THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hWnd));
   int cmd =
       TrackPopupMenu(menu.get(), TPM_BOTTOMALIGN | TPM_NONOTIFY | TPM_RETURNCMD,
                      pt.x, pt.y, 0, hWnd, nullptr);
@@ -167,7 +201,12 @@ void show_menu() {
     DestroyWindow(hWnd);
   } else if (cmd != 0) {
     toggle_top(wnds[cmd - 1]);
-  }
+  }*/
+  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0,
+                                        0, SWP_NOSIZE | SWP_SHOWWINDOW));
+  THROW_IF_WIN32_BOOL_FALSE(UpdateWindow(hMenu));
+  THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(anchor);
 }
 
 void toggle_top(HWND wnd) {
@@ -493,7 +532,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
 }
 
 HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
-  BITMAPV5HEADER header{0};
+  BITMAPV5HEADER header{};
   header.bV5Size = sizeof(BITMAPV5HEADER);
   header.bV5Width = width;
   header.bV5Height = height;
@@ -518,45 +557,63 @@ HBITMAP icon_to_bitmap(HICON icon) {
   return hBitmap;
 }
 
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
+LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
                          LPARAM lParam) {
-  static bool menu_showing = false;
-  switch (message) {
-  case UM_TRAY:
-    if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) && !menu_showing) {
-      try {
-        menu_showing = true;
-        show_menu();
-        menu_showing = false;
-      } catch (const std::exception &exc) {
-        CHAR fatal_title[MAX_LOADSTR];
-        LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
-        MessageBoxA(hWnd, exc.what(), fatal_title,
-                    MB_ICONERROR | MB_SYSTEMMODAL);
-        throw;
+  try {
+    if (thisHWnd == hWnd) {
+      switch (message) {
+      case UM_TRAY: {
+        static bool menu_showing = false;
+        if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) && !menu_showing) {
+          menu_showing = true;
+          show_menu();
+          menu_showing = false;
+        }
+        break;
       }
-    }
-    break;
-  case WM_HOTKEY: {
-    HWND foreground = GetForegroundWindow();
-    if (foreground) {
-      for (HWND owner; (owner = GetWindow(foreground, GW_OWNER));
-           foreground = owner)
-        ;
-      if (is_app_window(foreground)) {
-        toggle_top(foreground);
+      case WM_HOTKEY: {
+        HWND foreground = GetForegroundWindow();
+        if (foreground) {
+          for (HWND owner; (owner = GetWindow(foreground, GW_OWNER));
+              foreground = owner)
+            ;
+          if (is_app_window(foreground)) {
+            toggle_top(foreground);
+          }
+        }
+        break;
       }
+      case WM_DESTROY:
+        PostQuitMessage(0);
+        destroy_tray();
+        break;
+      default:
+        return DefWindowProcW(hWnd, message, wParam, lParam);
+      }
+    } else if (thisHWnd == hMenu) {
+      switch (message) {
+      case WM_KILLFOCUS: {
+        static bool first_time = true;
+        if (first_time) {
+          first_time = false;
+        } else {
+          ShowWindow(hMenu, SW_HIDE);
+        }
+        break;
+      }
+      default:
+        return DefWindowProcW(thisHWnd, message, wParam, lParam);
+      }
+    } else {
+      return DefWindowProcW(thisHWnd, message, wParam, lParam);
     }
-    break;
+  } catch (const std::exception &exc) {
+    CHAR fatal_title[MAX_LOADSTR];
+    LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
+    MessageBoxA(hWnd, exc.what(), fatal_title,
+                MB_ICONERROR | MB_SYSTEMMODAL);
+    throw;
   }
-  case WM_DESTROY:
-    PostQuitMessage(0);
-    destroy_tray();
-    break;
-  default:
-    return DefWindowProcW(hWnd, message, wParam, lParam);
-  }
-  return 0;
 }
 
 HBITMAP load_img(const WCHAR *path, int w, int h) {

@@ -33,5 +33,7 @@
     <ClCompile Include="source/pch.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <Manifest Include="PinToTop.exe.manifest" />
+    <None Include="packages.config" />
   </ItemGroup>
 </Project>
