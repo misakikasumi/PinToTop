@@ -7,7 +7,7 @@
 #include <comdef.h>
 #include <shellapi.h>
 #include <shlwapi.h>
-#include <shobjidl_core.h>
+#include <shobjidl.h>
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>
@@ -31,9 +31,6 @@ HINSTANCE hInst;
 HWND hWnd;
 WCHAR app_title[MAX_LOADSTR];
 WCHAR wnd_class[MAX_LOADSTR];
-constexpr CLSID CLSID_ImmersiveShell = {
-    0xC2F03A33, 0x21F5, 0x47FA, 0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39};
-IVirtualDesktopManager *vdm;
 
 void load_resource();
 void register_wndclass();
@@ -49,7 +46,6 @@ HBITMAP get_uwp_icon(HWND);
 HBITMAP icon_to_bitmap(HICON);
 int main_loop();
 HBITMAP load_img(const WCHAR *path, int w, int h);
-void init_vdm();
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -67,7 +63,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   register_wndclass();
   make_window();
   init_tray();
-  init_vdm();
   init_hotkey();
   return main_loop();
 }
@@ -140,9 +135,7 @@ void notify_error(UINT title_id, UINT info_id) {
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_MODIFY, &ncd));
 }
 
-void init_hotkey() {
-  RegisterHotKey(hWnd, 0, MOD_CONTROL|MOD_ALT, 0x54);
-}
+void init_hotkey() { RegisterHotKey(hWnd, 0, MOD_CONTROL | MOD_ALT, 0x54); }
 
 int main_loop() {
   MSG msg;
@@ -219,15 +212,13 @@ void toggle_top(HWND wnd) {
   }
 }
 
-void init_vdm() {
-  wil::com_ptr<IServiceProvider> sp;
-  THROW_IF_FAILED(CoCreateInstance(CLSID_ImmersiveShell, nullptr,
-                                   CLSCTX_LOCAL_SERVER,
-                                   __uuidof(IServiceProvider), (void **)&sp));
-  THROW_IF_FAILED(sp->QueryService(__uuidof(IVirtualDesktopManager), &vdm));
-}
-
 bool is_app_window(HWND wnd) {
+  static IVirtualDesktopManager *vdm;
+  if (!vdm) {
+    THROW_IF_FAILED(CoCreateInstance(
+        __uuidof(VirtualDesktopManager), nullptr, CLSCTX_INPROC_SERVER,
+        __uuidof(IVirtualDesktopManager), (void **)&vdm));
+  }
   LONG ex_sty = GetWindowLongW(wnd, GWL_EXSTYLE);
   WCHAR wnd_class[MAX_LOADSTR];
   wnd_class[RealGetWindowClassW(wnd, wnd_class, MAX_LOADSTR)] = 0;
@@ -348,10 +339,12 @@ HBITMAP get_uwp_icon(HWND wnd) {
   wil::com_ptr<IStream> is;
   THROW_IF_FAILED(
       SHCreateStreamOnFileEx(manifest_path, STGM_READ, 0, 0, 0, &is));
-  wil::com_ptr<IAppxFactory> factory;
-  THROW_IF_FAILED(CoCreateInstance(CLSID_AppxFactory, nullptr,
-                                   CLSCTX_INPROC_SERVER, __uuidof(IAppxFactory),
-                                   (void **)&factory));
+  static IAppxFactory *factory;
+  if (!factory) {
+    THROW_IF_FAILED(
+        CoCreateInstance(CLSID_AppxFactory, nullptr, CLSCTX_INPROC_SERVER,
+                         __uuidof(IAppxFactory), (void **)&factory));
+  }
   wil::com_ptr<IAppxManifestReader> reader;
   THROW_IF_FAILED(factory->CreateManifestReader(is.get(), &reader));
   wil::com_ptr<IAppxManifestApplicationsEnumerator> iter;
@@ -386,10 +379,11 @@ HBITMAP get_uwp_icon(HWND wnd) {
       }
       auto stem{loc.stem()};
       if (valid && stem.has_extension()) {
-        if(!parse_modifiers(std::wstring_view{stem.extension().native()}.substr(1),
-                        modifiers)) {
-                          valid = false;
-                        }
+        if (!parse_modifiers(
+                std::wstring_view{stem.extension().native()}.substr(1),
+                modifiers)) {
+          valid = false;
+        }
       }
       if (valid) {
         candidates.push_back({file.path().native(), std::move(modifiers)});
@@ -473,12 +467,10 @@ HBITMAP get_uwp_icon(HWND wnd) {
           return false;
         }
         if (lc != lm.end() && rc != rm.end()) {
-          if (lc->second == L"light" &&
-              rc->second != L"light") {
+          if (lc->second == L"light" && rc->second != L"light") {
             return true;
           }
-          if (lc->second != L"light" &&
-              rc->second == L"light") {
+          if (lc->second != L"light" && rc->second == L"light") {
             return false;
           }
         }
@@ -563,7 +555,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
       } catch (const std::exception &exc) {
         CHAR fatal_title[MAX_LOADSTR];
         LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
-        MessageBoxA(hWnd, exc.what(), fatal_title, MB_ICONERROR|MB_SYSTEMMODAL);
+        MessageBoxA(hWnd, exc.what(), fatal_title,
+                    MB_ICONERROR | MB_SYSTEMMODAL);
         throw;
       }
     }
@@ -571,7 +564,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
   case WM_HOTKEY: {
     HWND foreground = GetForegroundWindow();
     if (foreground) {
-      for (HWND owner; (owner = GetWindow(foreground, GW_OWNER)); foreground = owner);
+      for (HWND owner; (owner = GetWindow(foreground, GW_OWNER));
+           foreground = owner)
+        ;
       if (is_app_window(foreground)) {
         toggle_top(foreground);
       }
@@ -589,10 +584,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam,
 }
 
 HBITMAP load_img(const WCHAR *path, int w, int h) {
-  wil::com_ptr<IWICImagingFactory> factory;
-  THROW_IF_FAILED(
-      CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                       __uuidof(IWICImagingFactory), (void **)&factory));
+  static IWICImagingFactory *factory;
+  if (!factory) {
+    THROW_IF_FAILED(
+        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                         __uuidof(IWICImagingFactory), (void **)&factory));
+  }
   wil::com_ptr<IWICBitmapDecoder> decoder;
   THROW_IF_FAILED(factory->CreateDecoderFromFilename(
       path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
