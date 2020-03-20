@@ -8,6 +8,7 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
+#include <stdio.h>
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>

@@ -23,10 +23,10 @@ void show_menu();
 void toggle_top(HWND wnd);
 std::vector<HWND> get_app_windows();
 HICON get_window_icon(HWND);
-HBITMAP get_uwp_icon(HWND);
+std::optional<std::wstring> get_uwp_icon_path(HWND);
 HBITMAP icon_to_bitmap(HICON);
+void write_bitmap_to_png_file(HBITMAP, const WCHAR *);
 int main_loop();
-HBITMAP load_img(const WCHAR *path, int w, int h);
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -77,7 +77,10 @@ void make_window() {
   THROW_LAST_ERROR_IF_NULL(hWnd = CreateWindowW(wnd_class, app_title, 0, 0, 0,
                                                 0, 0, HWND_MESSAGE, nullptr,
                                                 hInst, nullptr));
-  THROW_LAST_ERROR_IF_NULL(hMenu = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class, app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
+  THROW_LAST_ERROR_IF_NULL(
+      hMenu = CreateWindowExW(
+          WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class,
+          app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
   THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
 }
 
@@ -122,20 +125,23 @@ void init_hotkey() { RegisterHotKey(hWnd, 0, MOD_CONTROL | MOD_ALT, 0x54); }
 
 void init_island() {
   static Windows::UI::Xaml::Hosting::WindowsXamlManager xaml_manager{nullptr};
-  static Windows::UI::Xaml::Hosting::DesktopWindowXamlSource desktop_source{nullptr};
-  xaml_manager = Windows::UI::Xaml::Hosting::WindowsXamlManager::InitializeForCurrentThread();
+  static Windows::UI::Xaml::Hosting::DesktopWindowXamlSource desktop_source{
+      nullptr};
+  xaml_manager = Windows::UI::Xaml::Hosting::WindowsXamlManager::
+      InitializeForCurrentThread();
   desktop_source = Windows::UI::Xaml::Hosting::DesktopWindowXamlSource{};
-  auto interop = desktop_source.as <IDesktopWindowXamlSourceNative>();
+  auto interop = desktop_source.as<IDesktopWindowXamlSourceNative>();
   THROW_IF_FAILED(interop->AttachToWindow(hMenu));
   HWND hIsland;
   THROW_IF_FAILED(interop->get_WindowHandle(&hIsland));
   SetWindowPos(hIsland, 0, 0, 0, 0, 0, SWP_SHOWWINDOW);
   anchor = Windows::UI::Xaml::Controls::TextBlock{};
   desktop_source.Content(anchor);
-  menu_flyout = Windows::UI::Xaml::Controls::MenuFlyout {};
+  menu_flyout = Windows::UI::Xaml::Controls::MenuFlyout{};
   menu_flyout.Placement(Windows::UI::Xaml::Controls::Primitives::
                             FlyoutPlacementMode::TopEdgeAlignedLeft);
-  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(anchor, menu_flyout);
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
+      anchor, menu_flyout);
 }
 
 int main_loop() {
@@ -160,53 +166,53 @@ void show_menu() {
   for (auto wnd : wnds) {
     WCHAR wnd_text[MAX_LOADSTR];
     wnd_text[GetWindowTextW(wnd, wnd_text, MAX_LOADSTR)] = 0;
-    //THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(
-    //    menu.get(), is_window_topmost(wnd) ? MF_CHECKED : 0, id, wnd_text));
     Windows::UI::Xaml::Controls::ToggleMenuFlyoutItem item;
     item.Text(wnd_text);
     item.IsChecked(is_window_topmost(wnd));
-    item.Click([wnd](Windows::Foundation::IInspectable const&, Windows::UI::Xaml::RoutedEventArgs const&){toggle_top(wnd);});
-    menu_flyout.Items().Append(item);
-    /*HBITMAP bitmap = get_uwp_icon(wnd);
-    if (!bitmap) {
-      HICON icon = get_window_icon(wnd);
-      if (icon) {
-        bitmap = icon_to_bitmap(icon);
+    Windows::UI::Xaml::Controls::BitmapIcon icon;
+    auto uwp_icon_path{get_uwp_icon_path(wnd)};
+    bool got_icon = false;
+    if (uwp_icon_path) {
+      icon.UriSource(Windows::Foundation::Uri(uwp_icon_path.value()));
+      got_icon = true;
+    } else {
+      auto hicon{get_window_icon(wnd)};
+      if (hicon) {
+        wil::unique_hbitmap hbitmap{icon_to_bitmap(hicon)};
+        WCHAR temp_file[MAX_LOADSTR];
+        THROW_HR_IF(E_UNEXPECTED, _wtmpnam_s(temp_file) != 0);
+        THROW_IF_FAILED(StringCchCatW(temp_file, MAX_LOADSTR, L".png"));
+        write_bitmap_to_png_file(hbitmap.get(), temp_file);
+        icon.UriSource(Windows::Foundation::Uri(temp_file));
+        got_icon = true;
       }
     }
-    if (bitmap) {
-      MENUITEMINFOW mii{};
-      mii.cbSize = sizeof(mii);
-      mii.fMask = MIIM_CHECKMARKS;
-      mii.hbmpUnchecked = bitmap;
-      THROW_IF_WIN32_BOOL_FALSE(SetMenuItemInfoW(menu.get(), id, FALSE, &mii));
-    }*/
+    icon.ShowAsMonochrome(false);
+    if (got_icon) {
+      item.Icon(icon);
+    }
+    item.Click(
+        [wnd](Windows::Foundation::IInspectable const &,
+              Windows::UI::Xaml::RoutedEventArgs const &) { toggle_top(wnd); });
+    menu_flyout.Items().Append(item);
     ++id;
   }
-  /*THROW_IF_WIN32_BOOL_FALSE(
-      AppendMenuW(menu.get(), MF_SEPARATOR, id + 1, nullptr));
-  THROW_IF_WIN32_BOOL_FALSE(AppendMenuW(menu.get(), 0, id, exit_str));*/
-  menu_flyout.Items().Append(Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
+  menu_flyout.Items().Append(
+      Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
   Windows::UI::Xaml::Controls::MenuFlyoutItem exit_item;
   exit_item.Text(exit_str);
-  exit_item.Click([](Windows::Foundation::IInspectable const&, Windows::UI::Xaml::RoutedEventArgs const&){DestroyWindow(hWnd);});
+  exit_item.Click(
+      [](Windows::Foundation::IInspectable const &,
+         Windows::UI::Xaml::RoutedEventArgs const &) { DestroyWindow(hWnd); });
   menu_flyout.Items().Append(exit_item);
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
-  /*THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hWnd));
-  int cmd =
-      TrackPopupMenu(menu.get(), TPM_BOTTOMALIGN | TPM_NONOTIFY | TPM_RETURNCMD,
-                     pt.x, pt.y, 0, hWnd, nullptr);
-  if (cmd == id) {
-    DestroyWindow(hWnd);
-  } else if (cmd != 0) {
-    toggle_top(wnds[cmd - 1]);
-  }*/
-  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0,
-                                        0, SWP_NOSIZE | SWP_SHOWWINDOW));
+  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0,
+                                         SWP_NOSIZE | SWP_SHOWWINDOW));
   THROW_IF_WIN32_BOOL_FALSE(UpdateWindow(hMenu));
   THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
-  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(anchor);
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
+      anchor);
 }
 
 void toggle_top(HWND wnd) {
@@ -301,7 +307,7 @@ bool parse_modifiers(std::wstring_view s,
   return true;
 }
 
-HBITMAP get_uwp_icon(HWND wnd) {
+std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
   DWORD pid;
   GetWindowThreadProcessId(wnd, &pid);
   wil::unique_handle p{
@@ -313,7 +319,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
       QueryFullProcessImageNameW(p.get(), 0, exename, &exelen));
   if (_wcsicmp(exename, L"C:\\Windows\\System32\\ApplicationFrameHost.exe") !=
       0) {
-    return nullptr;
+    return std::nullopt;
   }
   DWORD real_pid = pid;
   EnumChildWindows(
@@ -331,7 +337,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
       },
       LPARAM(&real_pid));
   if (real_pid == pid) {
-    return nullptr;
+    return std::nullopt;
   }
   p.reset(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, real_pid));
   THROW_LAST_ERROR_IF_NULL(p);
@@ -406,7 +412,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
     }
   }
   if (candidates.empty()) {
-    return nullptr;
+    return std::nullopt;
   }
 
   HIGHCONTRASTW hc;
@@ -528,7 +534,7 @@ HBITMAP get_uwp_icon(HWND wnd) {
         return lm.size() < rm.size();
       })};
 
-  return load_img(best->first.c_str(), cx, cx);
+  return best->first;
 }
 
 HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
@@ -543,6 +549,32 @@ HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
   header.bV5Intent = LCS_GM_GRAPHICS;
   return CreateDIBSection(nullptr, (BITMAPINFO *)&header, DIB_RGB_COLORS,
                           pp_bits, nullptr, 0);
+}
+
+void write_bitmap_to_png_file(HBITMAP bitmap, const WCHAR *path) {
+  static IWICImagingFactory *factory;
+  if (!factory) {
+    THROW_IF_FAILED(
+        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                         __uuidof(IWICImagingFactory), (void **)&factory));
+  }
+  wil::com_ptr<IWICBitmap> source;
+  THROW_IF_FAILED(factory->CreateBitmapFromHBITMAP(bitmap, nullptr,
+                                                   WICBitmapUseAlpha, &source));
+  wil::com_ptr<IStream> stream;
+  THROW_IF_FAILED(SHCreateStreamOnFileEx(
+      path, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_CREATE,
+      FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream));
+  wil::com_ptr<IWICBitmapEncoder> encoder;
+  THROW_IF_FAILED(
+      factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder));
+  THROW_IF_FAILED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache));
+  wil::com_ptr<IWICBitmapFrameEncode> frame;
+  THROW_IF_FAILED(encoder->CreateNewFrame(&frame, nullptr));
+  THROW_IF_FAILED(frame->Initialize(nullptr));
+  THROW_IF_FAILED(frame->WriteSource(source.get(), nullptr));
+  THROW_IF_FAILED(frame->Commit());
+  THROW_IF_FAILED(encoder->Commit());
 }
 
 HBITMAP icon_to_bitmap(HICON icon) {
@@ -564,7 +596,8 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
       switch (message) {
       case UM_TRAY: {
         static bool menu_showing = false;
-        if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) && !menu_showing) {
+        if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) &&
+            !menu_showing) {
           menu_showing = true;
           show_menu();
           menu_showing = false;
@@ -575,7 +608,7 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         HWND foreground = GetForegroundWindow();
         if (foreground) {
           for (HWND owner; (owner = GetWindow(foreground, GW_OWNER));
-              foreground = owner)
+               foreground = owner)
             ;
           if (is_app_window(foreground)) {
             toggle_top(foreground);
@@ -596,8 +629,10 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         static bool first_time = true;
         if (first_time) {
           first_time = false;
+          THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
         } else {
-          ShowWindow(hMenu, SW_HIDE);
+          THROW_IF_WIN32_BOOL_FALSE(ShowWindow(hMenu, SW_HIDE));
+          menu_flyout.Items().Clear();
         }
         break;
       }
@@ -610,52 +645,8 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
   } catch (const std::exception &exc) {
     CHAR fatal_title[MAX_LOADSTR];
     LoadStringA(hInst, IDS_FATAL_MSGBOX_TITLE, fatal_title, MAX_LOADSTR);
-    MessageBoxA(hWnd, exc.what(), fatal_title,
-                MB_ICONERROR | MB_SYSTEMMODAL);
+    MessageBoxA(hWnd, exc.what(), fatal_title, MB_ICONERROR | MB_SYSTEMMODAL);
     throw;
   }
-}
-
-HBITMAP load_img(const WCHAR *path, int w, int h) {
-  static IWICImagingFactory *factory;
-  if (!factory) {
-    THROW_IF_FAILED(
-        CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                         __uuidof(IWICImagingFactory), (void **)&factory));
-  }
-  wil::com_ptr<IWICBitmapDecoder> decoder;
-  THROW_IF_FAILED(factory->CreateDecoderFromFilename(
-      path, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &decoder));
-  wil::com_ptr<IWICBitmapFrameDecode> frame;
-  THROW_IF_FAILED(decoder->GetFrame(0, &frame));
-  wil::com_ptr<IWICFormatConverter> converter;
-  THROW_IF_FAILED(factory->CreateFormatConverter(&converter));
-  THROW_IF_FAILED(converter->Initialize(
-      frame.get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
-      nullptr, 0, WICBitmapPaletteTypeCustom));
-  wil::com_ptr<IWICColorContext> src_context;
-  THROW_IF_FAILED(factory->CreateColorContext(&src_context));
-  UINT icc_count;
-  THROW_IF_FAILED(
-      frame->GetColorContexts(1, src_context.addressof(), &icc_count));
-  if (icc_count == 0) {
-    THROW_IF_FAILED(src_context->InitializeFromExifColorSpace(1));
-  }
-  wil::com_ptr<IWICColorContext> dst_context;
-  THROW_IF_FAILED(factory->CreateColorContext(&dst_context));
-  THROW_IF_FAILED(dst_context->InitializeFromExifColorSpace(1));
-  wil::com_ptr<IWICColorTransform> transformer;
-  THROW_IF_FAILED(factory->CreateColorTransformer(&transformer));
-  THROW_IF_FAILED(transformer->Initialize(converter.get(), src_context.get(),
-                                          dst_context.get(),
-                                          GUID_WICPixelFormat32bppBGRA));
-  wil::com_ptr<IWICBitmapScaler> scaled;
-  THROW_IF_FAILED(factory->CreateBitmapScaler(&scaled));
-  THROW_IF_FAILED(scaled->Initialize(
-      transformer.get(), w, h, WICBitmapInterpolationModeHighQualityCubic));
-  void *p_bits;
-  wil::unique_hbitmap bitmap{create_dib(w, -h, &p_bits)};
-  THROW_IF_FAILED(
-      scaled->CopyPixels(nullptr, w * 4, w * h * 4, (BYTE *)p_bits));
-  return bitmap.release();
+  return 0;
 }
