@@ -107,6 +107,7 @@
     <ClCompile Include="source/main.cpp" />
     <ResourceCompile Include="resource/resource.rc" />
     <Image Include="resource/app.ico" />
+    <Image Include="resource/app.theme-dark.ico" />
     <Manifest Include="PinToTop.exe.manifest" />
   </ItemGroup>
 

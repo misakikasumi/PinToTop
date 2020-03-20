@@ -12,6 +12,7 @@
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>
+#include <winreg.h>
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -35,3 +36,4 @@
 #include "wil/com.h"
 #include "wil/resource.h"
 #include "wil/result.h"
+#include "wil/registry.h"

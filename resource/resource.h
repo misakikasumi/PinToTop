@@ -3,6 +3,7 @@
 // Used by resource.rc
 //
 #define IDI_APP                         5
+#define IDI_APP_THEME_DARK              6
 #define IDS_APP_TITLE                   101
 #define IDC_WNDCLASS                    102
 #define IDS_EXIT                        103

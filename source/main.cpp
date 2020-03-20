@@ -4,6 +4,7 @@ using namespace winrt;
 
 constexpr int MAX_LOADSTR = 260;
 constexpr UINT UM_TRAY = WM_USER + 1;
+constexpr UINT UM_THEMECHANGED = WM_USER + 2;
 HINSTANCE hInst;
 HWND hWnd, hMenu;
 WCHAR app_title[MAX_LOADSTR];
@@ -11,12 +12,13 @@ WCHAR wnd_class[MAX_LOADSTR];
 
 Windows::UI::Xaml::Controls::TextBlock anchor{nullptr};
 Windows::UI::Xaml::Controls::MenuFlyout menu_flyout{nullptr};
-bool is_dark_theme;
+bool apps_use_dark_theme, system_uses_dark_theme;
 
 void load_resource();
+void init_theme();
 void register_wndclass();
 void make_window();
-void init_tray();
+void init_tray(bool = false);
 void destroy_tray();
 void init_hotkey();
 void init_island();
@@ -41,6 +43,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
   init_apartment();
   load_resource();
+  init_theme();
   register_wndclass();
   make_window();
   init_tray();
@@ -85,19 +88,23 @@ void make_window() {
   THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
 }
 
-void init_tray() {
+void init_tray(bool reinit) {
   NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
   ncd.hWnd = hWnd;
   ncd.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
   const int cx = get_iconsm_metric();
   ncd.hIcon = HICON(THROW_LAST_ERROR_IF_NULL(
-      LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON, cx, cx, 0)));
+      LoadImageW(hInst,
+                 system_uses_dark_theme ? MAKEINTRESOURCEW(IDI_APP_THEME_DARK)
+                                        : MAKEINTRESOURCEW(IDI_APP),
+                 IMAGE_ICON, cx, cx, 0)));
   ncd.uVersion = NOTIFYICON_VERSION_4;
   ncd.uCallbackMessage = UM_TRAY;
   THROW_IF_FAILED(
       StringCchCopyW(ncd.szTip, sizeof(ncd.szTip) / sizeof(WCHAR), app_title));
-  THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_ADD, &ncd));
+  THROW_IF_WIN32_BOOL_FALSE(
+      Shell_NotifyIconW(reinit ? NIM_MODIFY : NIM_ADD, &ncd));
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_SETVERSION, &ncd));
 }
 
@@ -124,6 +131,14 @@ void notify_error(UINT title_id, UINT info_id) {
 
 void init_hotkey() { RegisterHotKey(hWnd, 0, MOD_CONTROL | MOD_ALT, 0x54); }
 
+void create_menu_flyout() {
+  menu_flyout = Windows::UI::Xaml::Controls::MenuFlyout{};
+  menu_flyout.Placement(Windows::UI::Xaml::Controls::Primitives::
+                            FlyoutPlacementMode::TopEdgeAlignedLeft);
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
+      anchor, menu_flyout);
+}
+
 void init_island() {
   static Windows::UI::Xaml::Hosting::WindowsXamlManager xaml_manager{nullptr};
   static Windows::UI::Xaml::Hosting::DesktopWindowXamlSource desktop_source{
@@ -138,17 +153,48 @@ void init_island() {
   SetWindowPos(hIsland, 0, 0, 0, 0, 0, SWP_SHOWWINDOW);
   anchor = Windows::UI::Xaml::Controls::TextBlock{};
   desktop_source.Content(anchor);
-  menu_flyout = Windows::UI::Xaml::Controls::MenuFlyout{};
-  menu_flyout.Placement(Windows::UI::Xaml::Controls::Primitives::
-                            FlyoutPlacementMode::TopEdgeAlignedLeft);
-  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
-      anchor, menu_flyout);
+  create_menu_flyout();
+}
 
-  Windows::UI::ViewManagement::UISettings theme;
-  auto background_color{theme.GetColorValue(
-      Windows::UI::ViewManagement::UIColorType::Background)};
-  is_dark_theme = background_color.R == 0 && background_color.G == 0 &&
-                  background_color.B == 0;
+constexpr WCHAR reg_theme_path[] =
+    L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+
+void get_theme() {
+  wil::unique_hkey key;
+  THROW_IF_WIN32_ERROR(RegOpenKeyExW(HKEY_CURRENT_USER, reg_theme_path, 0,
+                                     KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key));
+  DWORD use_light_theme;
+  DWORD buf_len;
+  buf_len = sizeof(DWORD);
+  THROW_IF_WIN32_ERROR(RegQueryValueExW(key.get(), L"AppsUseLightTheme",
+                                        nullptr, nullptr,
+                                        (BYTE *)&use_light_theme, &buf_len));
+  apps_use_dark_theme = !use_light_theme;
+  buf_len = sizeof(DWORD);
+  THROW_IF_WIN32_ERROR(RegQueryValueExW(key.get(), L"SystemUsesLightTheme",
+                                        nullptr, nullptr,
+                                        (BYTE *)&use_light_theme, &buf_len));
+  system_uses_dark_theme = !use_light_theme;
+}
+
+void init_theme() {
+  static wil::unique_registry_watcher watcher;
+  get_theme();
+  watcher = wil::make_registry_watcher(
+      HKEY_CURRENT_USER, reg_theme_path, false,
+      [](wil::RegistryChangeKind change_kind) {
+        auto previous_apps_use_dark_theme = apps_use_dark_theme;
+        auto previous_system_uses_dark_theme = system_uses_dark_theme;
+        get_theme();
+        apps_use_dark_theme = previous_apps_use_dark_theme;
+        WPARAM wParam =
+            MAKELONG(apps_use_dark_theme != previous_apps_use_dark_theme,
+                     system_uses_dark_theme != previous_system_uses_dark_theme);
+        if (wParam) {
+          THROW_IF_WIN32_BOOL_FALSE(
+              SendNotifyMessageW(hWnd, UM_THEMECHANGED, wParam, 0));
+        }
+      });
 }
 
 int main_loop() {
@@ -479,7 +525,7 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
           return false;
         }
         if (lc != lm.end() && rc != rm.end()) {
-          if (!is_dark_theme) {
+          if (!apps_use_dark_theme) {
             if (lc->second == L"lightunplated" &&
                 rc->second != L"lightunplated") {
               return true;
@@ -506,7 +552,7 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
           return false;
         }
         if (lc != lm.end() && rc != rm.end()) {
-          if (!is_dark_theme) {
+          if (!apps_use_dark_theme) {
             if (lc->second == L"light" && rc->second != L"light") {
               return true;
             }
@@ -643,6 +689,14 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         }
         break;
       }
+      case UM_THEMECHANGED:
+        if (LOWORD(wParam)) {
+          create_menu_flyout();
+        }
+        if (HIWORD(wParam)) {
+          init_tray(true);
+        }
+        break;
       case WM_DESTROY:
         PostQuitMessage(0);
         destroy_tray();

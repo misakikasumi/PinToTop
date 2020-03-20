@@ -27,6 +27,9 @@
     <Image Include="resource/app.ico">
       <Filter>Resource Files</Filter>
     </Image>
+    <Image Include="resource/app.theme-dark.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
     <ClInclude Include="source/pch.h">
       <Filter>Header Files</Filter>
     </ClInclude>
