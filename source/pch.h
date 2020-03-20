@@ -23,6 +23,7 @@
 #include <Windows.UI.Xaml.Hosting.DesktopWindowXamlSource.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
 #include <filesystem>

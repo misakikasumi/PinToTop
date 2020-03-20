@@ -11,6 +11,7 @@ WCHAR wnd_class[MAX_LOADSTR];
 
 Windows::UI::Xaml::Controls::TextBlock anchor{nullptr};
 Windows::UI::Xaml::Controls::MenuFlyout menu_flyout{nullptr};
+bool is_dark_theme;
 
 void load_resource();
 void register_wndclass();
@@ -142,6 +143,12 @@ void init_island() {
                             FlyoutPlacementMode::TopEdgeAlignedLeft);
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
       anchor, menu_flyout);
+
+  Windows::UI::ViewManagement::UISettings theme;
+  auto background_color{theme.GetColorValue(
+      Windows::UI::ViewManagement::UIColorType::Background)};
+  is_dark_theme = background_color.R == 0 && background_color.G == 0 &&
+                  background_color.B == 0;
 }
 
 int main_loop() {
@@ -197,8 +204,10 @@ void show_menu() {
     menu_flyout.Items().Append(item);
     ++id;
   }
-  menu_flyout.Items().Append(
-      Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
+  if (!wnds.empty()) {
+    menu_flyout.Items().Append(
+        Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
+  }
   Windows::UI::Xaml::Controls::MenuFlyoutItem exit_item;
   exit_item.Text(exit_str);
   exit_item.Click(
@@ -470,13 +479,22 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
           return false;
         }
         if (lc != lm.end() && rc != rm.end()) {
-          if (lc->second == L"lightunplated" &&
-              rc->second != L"lightunplated") {
-            return true;
-          }
-          if (lc->second != L"lightunplated" &&
-              rc->second == L"lightunplated") {
-            return false;
+          if (!is_dark_theme) {
+            if (lc->second == L"lightunplated" &&
+                rc->second != L"lightunplated") {
+              return true;
+            }
+            if (lc->second != L"lightunplated" &&
+                rc->second == L"lightunplated") {
+              return false;
+            }
+          } else {
+            if (lc->second == L"unplated" && rc->second != L"unplated") {
+              return true;
+            }
+            if (lc->second != L"unplated" && rc->second == L"unplated") {
+              return false;
+            }
           }
         }
         lc = lm.find(L"theme");
@@ -488,11 +506,20 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
           return false;
         }
         if (lc != lm.end() && rc != rm.end()) {
-          if (lc->second == L"light" && rc->second != L"light") {
-            return true;
-          }
-          if (lc->second != L"light" && rc->second == L"light") {
-            return false;
+          if (!is_dark_theme) {
+            if (lc->second == L"light" && rc->second != L"light") {
+              return true;
+            }
+            if (lc->second != L"light" && rc->second == L"light") {
+              return false;
+            }
+          } else {
+            if (lc->second == L"dark" && rc->second != L"dark") {
+              return true;
+            }
+            if (lc->second != L"dark" && rc->second == L"dark") {
+              return false;
+            }
           }
         }
         lc = lm.find(L"targetsize");
