@@ -85,7 +85,8 @@ void make_window() {
           WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class,
           app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
   THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
-  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW));
+  THROW_IF_WIN32_BOOL_FALSE(
+      SetWindowPos(hMenu, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW));
 }
 
 void init_tray(bool reinit) {
@@ -181,8 +182,7 @@ void init_theme() {
   static wil::unique_registry_watcher watcher;
   get_theme();
   watcher = wil::make_registry_watcher(
-      HKEY_CURRENT_USER, reg_theme_path, false,
-      [](wil::RegistryChangeKind change_kind) {
+      HKEY_CURRENT_USER, reg_theme_path, false, [](auto) {
         auto previous_apps_use_dark_theme = apps_use_dark_theme;
         auto previous_system_uses_dark_theme = system_uses_dark_theme;
         get_theme();
@@ -255,9 +255,7 @@ void show_menu() {
     if (got_icon) {
       item.Icon(icon);
     }
-    item.Click(
-        [wnd](Windows::Foundation::IInspectable const &,
-              Windows::UI::Xaml::RoutedEventArgs const &) { toggle_top(wnd); });
+    item.Click([wnd](const auto &, const auto &) { toggle_top(wnd); });
     menu_flyout.Items().Append(item);
     ++id;
   }
@@ -267,13 +265,12 @@ void show_menu() {
   }
   Windows::UI::Xaml::Controls::MenuFlyoutItem exit_item;
   exit_item.Text(exit_str);
-  exit_item.Click(
-      [](Windows::Foundation::IInspectable const &,
-         Windows::UI::Xaml::RoutedEventArgs const &) { DestroyWindow(hWnd); });
+  exit_item.Click([](const auto &, const auto &) { DestroyWindow(hWnd); });
   menu_flyout.Items().Append(exit_item);
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
-  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
+  THROW_IF_WIN32_BOOL_FALSE(
+      SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
   THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
       anchor);
@@ -444,7 +441,8 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
   std::vector<std::pair<std::filesystem::path,
                         std::unordered_map<std::wstring, std::wstring>>>
       candidates;
-  for (auto file : std::filesystem::recursive_directory_iterator{folder_path}) {
+  for (const auto &file :
+       std::filesystem::recursive_directory_iterator{folder_path}) {
     if (file.is_regular_file() &&
         std::wstring_view{file.path().filename().native()}.substr(
             0, logo_stw.size()) == logo_stw) {
