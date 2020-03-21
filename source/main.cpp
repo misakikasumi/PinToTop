@@ -27,8 +27,7 @@ void toggle_top(HWND wnd);
 std::vector<HWND> get_app_windows();
 HICON get_window_icon(HWND);
 std::optional<std::wstring> get_uwp_icon_path(HWND);
-HBITMAP icon_to_bitmap(HICON);
-void write_bitmap_to_png_file(HBITMAP, const WCHAR *);
+void write_icon(HICON, IStream *);
 int main_loop();
 LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
@@ -231,11 +230,22 @@ void show_menu() {
     } else {
       auto hicon{get_window_icon(wnd)};
       if (hicon) {
-        wil::unique_hbitmap hbitmap{icon_to_bitmap(hicon)};
-        WCHAR temp_file[MAX_LOADSTR];
-        THROW_HR_IF(E_UNEXPECTED, _wtmpnam_s(temp_file) != 0);
-        THROW_IF_FAILED(StringCchCatW(temp_file, MAX_LOADSTR, L".png"));
-        write_bitmap_to_png_file(hbitmap.get(), temp_file);
+        WCHAR temp_path[MAX_LOADSTR], temp_file[MAX_LOADSTR];
+        THROW_LAST_ERROR_IF(GetTempPathW(MAX_LOADSTR, temp_path) == 0);
+        THROW_IF_FAILED(StringCchPrintfW(temp_file, MAX_LOADSTR, L"%ws%p.png",
+                                         temp_path, hicon));
+        {
+          wil::com_ptr<IStream> stream;
+          auto hr = SHCreateStreamOnFileEx(
+              temp_file,
+              STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_FAILIFTHERE,
+              FILE_ATTRIBUTE_NORMAL, TRUE, nullptr, &stream);
+          if (SUCCEEDED(hr)) {
+            write_icon(hicon, stream.get());
+          } else if ((hr & 0xffff) != ERROR_FILE_EXISTS) {
+            THROW_HR(hr);
+          }
+        }
         icon.UriSource(Windows::Foundation::Uri(temp_file));
         got_icon = true;
       }
@@ -610,21 +620,7 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
   return best->first;
 }
 
-HBITMAP create_dib(LONG width, LONG height, void **pp_bits = nullptr) {
-  BITMAPV5HEADER header{};
-  header.bV5Size = sizeof(BITMAPV5HEADER);
-  header.bV5Width = width;
-  header.bV5Height = height;
-  header.bV5Planes = 1;
-  header.bV5BitCount = 32;
-  header.bV5Compression = BI_RGB;
-  header.bV5CSType = LCS_sRGB;
-  header.bV5Intent = LCS_GM_GRAPHICS;
-  return CreateDIBSection(nullptr, (BITMAPINFO *)&header, DIB_RGB_COLORS,
-                          pp_bits, nullptr, 0);
-}
-
-void write_bitmap_to_png_file(HBITMAP bitmap, const WCHAR *path) {
+void write_icon(HICON icon, IStream *stream) {
   static IWICImagingFactory *factory;
   if (!factory) {
     THROW_IF_FAILED(
@@ -632,34 +628,17 @@ void write_bitmap_to_png_file(HBITMAP bitmap, const WCHAR *path) {
                          __uuidof(IWICImagingFactory), (void **)&factory));
   }
   wil::com_ptr<IWICBitmap> source;
-  THROW_IF_FAILED(factory->CreateBitmapFromHBITMAP(bitmap, nullptr,
-                                                   WICBitmapUseAlpha, &source));
-  wil::com_ptr<IStream> stream;
-  THROW_IF_FAILED(SHCreateStreamOnFileEx(
-      path, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_CREATE,
-      FILE_ATTRIBUTE_NORMAL, FALSE, nullptr, &stream));
+  THROW_IF_FAILED(factory->CreateBitmapFromHICON(icon, &source));
   wil::com_ptr<IWICBitmapEncoder> encoder;
   THROW_IF_FAILED(
       factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder));
-  THROW_IF_FAILED(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache));
+  THROW_IF_FAILED(encoder->Initialize(stream, WICBitmapEncoderNoCache));
   wil::com_ptr<IWICBitmapFrameEncode> frame;
   THROW_IF_FAILED(encoder->CreateNewFrame(&frame, nullptr));
   THROW_IF_FAILED(frame->Initialize(nullptr));
   THROW_IF_FAILED(frame->WriteSource(source.get(), nullptr));
   THROW_IF_FAILED(frame->Commit());
   THROW_IF_FAILED(encoder->Commit());
-}
-
-HBITMAP icon_to_bitmap(HICON icon) {
-  wil::unique_hdc_window hdc{GetDC(nullptr)};
-  wil::unique_hdc hMemDC{CreateCompatibleDC(hdc.get())};
-  const int cx = get_iconsm_metric();
-  HBITMAP hBitmap = create_dib(cx, cx);
-  wil::unique_hgdiobj hOrgBmp{SelectObject(hMemDC.get(), hBitmap)};
-  THROW_IF_WIN32_BOOL_FALSE(
-      DrawIconEx(hMemDC.get(), 0, 0, icon, cx, cx, 0, nullptr, DI_NORMAL));
-  SelectObject(hMemDC.get(), hOrgBmp.release());
-  return hBitmap;
 }
 
 LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
