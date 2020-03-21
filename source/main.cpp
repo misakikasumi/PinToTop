@@ -85,6 +85,7 @@ void make_window() {
           WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class,
           app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
   THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
+  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW));
 }
 
 void init_tray(bool reinit) {
@@ -272,9 +273,7 @@ void show_menu() {
   menu_flyout.Items().Append(exit_item);
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
-  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0,
-                                         SWP_NOSIZE | SWP_SHOWWINDOW));
-  THROW_IF_WIN32_BOOL_FALSE(UpdateWindow(hMenu));
+  THROW_IF_WIN32_BOOL_FALSE(SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
   THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
       anchor);
@@ -682,22 +681,6 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         break;
       default:
         return DefWindowProcW(hWnd, message, wParam, lParam);
-      }
-    } else if (thisHWnd == hMenu) {
-      switch (message) {
-      case WM_KILLFOCUS: {
-        static bool first_time = true;
-        if (first_time) {
-          first_time = false;
-          THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
-        } else {
-          THROW_IF_WIN32_BOOL_FALSE(ShowWindow(hMenu, SW_HIDE));
-          menu_flyout.Items().Clear();
-        }
-        break;
-      }
-      default:
-        return DefWindowProcW(thisHWnd, message, wParam, lParam);
       }
     } else {
       return DefWindowProcW(thisHWnd, message, wParam, lParam);
