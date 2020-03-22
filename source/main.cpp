@@ -141,6 +141,8 @@ void create_menu_flyout() {
                             FlyoutPlacementMode::TopEdgeAlignedLeft);
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
       anchor, menu_flyout);
+  menu_flyout.Closed(
+      [](const auto &, const auto &) { menu_flyout.Items().Clear(); });
 }
 
 void init_island() {
