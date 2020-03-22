@@ -27,9 +27,13 @@
 #include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <filesystem>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 

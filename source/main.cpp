@@ -5,6 +5,7 @@ using namespace winrt;
 constexpr int MAX_LOADSTR = 260;
 constexpr UINT UM_TRAY = WM_USER + 1;
 constexpr UINT UM_THEMECHANGED = WM_USER + 2;
+constexpr UINT UM_SETMENUITEMICON = WM_USER + 3;
 HINSTANCE hInst;
 HWND hWnd, hMenu;
 WCHAR app_title[MAX_LOADSTR];
@@ -22,6 +23,7 @@ void init_tray(bool = false);
 void destroy_tray();
 void init_hotkey();
 void init_island();
+void init_icon_thread();
 void show_menu();
 void toggle_top(HWND wnd);
 std::vector<HWND> get_app_windows();
@@ -48,6 +50,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   init_tray();
   init_hotkey();
   init_island();
+  init_icon_thread();
   return main_loop();
 }
 
@@ -210,63 +213,43 @@ bool is_window_topmost(HWND wnd) {
   return GetWindowLongW(wnd, GWL_EXSTYLE) & WS_EX_TOPMOST;
 }
 
+std::queue<std::pair<HWND, Windows::UI::Xaml::Controls::BitmapIcon>> itq;
+std::queue<std::pair<std::wstring, Windows::UI::Xaml::Controls::BitmapIcon>>
+    itbq;
+std::condition_variable itcv;
+std::mutex itmutex;
+
 void show_menu() {
   WCHAR exit_str[MAX_LOADSTR];
   THROW_LAST_ERROR_IF(LoadStringW(hInst, IDS_EXIT, exit_str, MAX_LOADSTR) == 0);
-  menu_flyout.Items().Clear();
+  auto menu_items{menu_flyout.Items()};
+  menu_items.Clear();
   auto wnds{get_app_windows()};
-  UINT id = 1;
-  for (auto wnd : wnds) {
-    WCHAR wnd_text[MAX_LOADSTR];
-    wnd_text[GetWindowTextW(wnd, wnd_text, MAX_LOADSTR)] = 0;
-    Windows::UI::Xaml::Controls::ToggleMenuFlyoutItem item;
-    item.Text(wnd_text);
-    item.IsChecked(is_window_topmost(wnd));
-    Windows::UI::Xaml::Controls::BitmapIcon icon;
-    auto uwp_icon_path{get_uwp_icon_path(wnd)};
-    bool got_icon = false;
-    if (uwp_icon_path) {
-      icon.UriSource(Windows::Foundation::Uri(uwp_icon_path.value()));
-      got_icon = true;
-    } else {
-      auto hicon{get_window_icon(wnd)};
-      if (hicon) {
-        WCHAR temp_path[MAX_LOADSTR], temp_file[MAX_LOADSTR];
-        THROW_LAST_ERROR_IF(GetTempPathW(MAX_LOADSTR, temp_path) == 0);
-        THROW_IF_FAILED(StringCchPrintfW(temp_file, MAX_LOADSTR, L"%ws%p.png",
-                                         temp_path, hicon));
-        {
-          wil::com_ptr<IStream> stream;
-          auto hr = SHCreateStreamOnFileEx(
-              temp_file,
-              STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_FAILIFTHERE,
-              FILE_ATTRIBUTE_NORMAL, TRUE, nullptr, &stream);
-          if (SUCCEEDED(hr)) {
-            write_icon(hicon, stream.get());
-          } else if ((hr & 0xffff) != ERROR_FILE_EXISTS) {
-            THROW_HR(hr);
-          }
-        }
-        icon.UriSource(Windows::Foundation::Uri(temp_file));
-        got_icon = true;
-      }
-    }
-    icon.ShowAsMonochrome(false);
-    if (got_icon) {
+  {
+    std::scoped_lock lck{itmutex};
+    for (auto wnd : wnds) {
+      WCHAR wnd_text[MAX_LOADSTR];
+      wnd_text[GetWindowTextW(wnd, wnd_text, MAX_LOADSTR)] = 0;
+      Windows::UI::Xaml::Controls::ToggleMenuFlyoutItem item;
+      Windows::UI::Xaml::Controls::BitmapIcon icon;
+      icon.ShowAsMonochrome(false);
+      item.Text(wnd_text);
       item.Icon(icon);
+      item.IsChecked(is_window_topmost(wnd));
+      item.Click([wnd](const auto &, const auto &) { toggle_top(wnd); });
+      menu_items.Append(item);
+
+      itq.push({wnd, std::move(icon)});
     }
-    item.Click([wnd](const auto &, const auto &) { toggle_top(wnd); });
-    menu_flyout.Items().Append(item);
-    ++id;
+    itcv.notify_one();
   }
   if (!wnds.empty()) {
-    menu_flyout.Items().Append(
-        Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
+    menu_items.Append(Windows::UI::Xaml::Controls::MenuFlyoutSeparator{});
   }
   Windows::UI::Xaml::Controls::MenuFlyoutItem exit_item;
   exit_item.Text(exit_str);
   exit_item.Click([](const auto &, const auto &) { DestroyWindow(hWnd); });
-  menu_flyout.Items().Append(exit_item);
+  menu_items.Append(exit_item);
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
   THROW_IF_WIN32_BOOL_FALSE(
@@ -274,6 +257,57 @@ void show_menu() {
   THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
       anchor);
+}
+
+std::optional<std::wstring> get_window_icon_uri(HWND wnd) {
+  if (!IsWindow(wnd)) {
+    return std::nullopt;
+  }
+  auto uwp_icon_path{get_uwp_icon_path(wnd)};
+  if (uwp_icon_path) {
+    return *uwp_icon_path;
+  } else {
+    auto hicon{get_window_icon(wnd)};
+    if (hicon) {
+      WCHAR temp_path[MAX_LOADSTR], temp_file[MAX_LOADSTR];
+      THROW_LAST_ERROR_IF(GetTempPathW(MAX_LOADSTR, temp_path) == 0);
+      THROW_IF_FAILED(StringCchPrintfW(temp_file, MAX_LOADSTR, L"%ws%p.png",
+                                       temp_path, hicon));
+      {
+        wil::com_ptr<IStream> stream;
+        auto hr = SHCreateStreamOnFileEx(
+            temp_file, STGM_READWRITE | STGM_SHARE_EXCLUSIVE | STGM_FAILIFTHERE,
+            FILE_ATTRIBUTE_NORMAL, TRUE, nullptr, &stream);
+        if (SUCCEEDED(hr)) {
+          write_icon(hicon, stream.get());
+        } else if ((hr & 0xffff) != ERROR_FILE_EXISTS) {
+          THROW_HR(hr);
+        }
+      }
+      return temp_file;
+    }
+  }
+  return std::nullopt;
+}
+
+void init_icon_thread() {
+  std::thread{[] {
+    while (true) {
+      std::unique_lock lck{itmutex};
+      itcv.wait(lck);
+      while (!itq.empty()) {
+        auto wnd{itq.front().first};
+        auto icon{std::move(itq.front().second)};
+        itq.pop();
+        auto uri{get_window_icon_uri(wnd)};
+        if (uri) {
+          itbq.push({std::move(*uri), std::move(icon)});
+        }
+      }
+      THROW_IF_WIN32_BOOL_FALSE(
+          SendNotifyMessage(hWnd, UM_SETMENUITEMICON, 0, 0));
+    }
+  }}.detach();
 }
 
 void toggle_top(HWND wnd) {
@@ -673,6 +707,16 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
           init_tray(true);
         }
         break;
+      case UM_SETMENUITEMICON: {
+        std::scoped_lock lck{itmutex};
+        while (!itbq.empty()) {
+          auto uri{std::move(itbq.front().first)};
+          auto icon{std::move(itbq.front().second)};
+          itbq.pop();
+          icon.UriSource(Windows::Foundation::Uri(uri));
+        }
+        break;
+      }
       case WM_DESTROY:
         PostQuitMessage(0);
         destroy_tray();
