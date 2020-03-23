@@ -7,7 +7,7 @@ constexpr UINT UM_TRAY = WM_USER + 1;
 constexpr UINT UM_THEMECHANGED = WM_USER + 2;
 constexpr UINT UM_SETMENUITEMICON = WM_USER + 3;
 HINSTANCE hInst;
-HWND hWnd, hMenu;
+HWND hWnd;
 WCHAR app_title[MAX_LOADSTR];
 WCHAR wnd_class[MAX_LOADSTR];
 
@@ -80,16 +80,13 @@ void register_wndclass() {
 }
 
 void make_window() {
-  THROW_LAST_ERROR_IF_NULL(hWnd = CreateWindowW(wnd_class, app_title, 0, 0, 0,
-                                                0, 0, HWND_MESSAGE, nullptr,
-                                                hInst, nullptr));
   THROW_LAST_ERROR_IF_NULL(
-      hMenu = CreateWindowExW(
+      hWnd = CreateWindowExW(
           WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_LAYERED, wnd_class,
           app_title, 0, 0, 0, 0, 0, nullptr, nullptr, hInst, nullptr));
-  THROW_LAST_ERROR_IF(SetWindowLongW(hMenu, GWL_STYLE, 0) == 0);
+  THROW_LAST_ERROR_IF(SetWindowLongW(hWnd, GWL_STYLE, 0) == 0);
   THROW_IF_WIN32_BOOL_FALSE(
-      SetWindowPos(hMenu, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW));
+      SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_SHOWWINDOW));
 }
 
 void init_tray(bool reinit) {
@@ -153,7 +150,7 @@ void init_island() {
       InitializeForCurrentThread();
   desktop_source = Windows::UI::Xaml::Hosting::DesktopWindowXamlSource{};
   auto interop = desktop_source.as<IDesktopWindowXamlSourceNative>();
-  THROW_IF_FAILED(interop->AttachToWindow(hMenu));
+  THROW_IF_FAILED(interop->AttachToWindow(hWnd));
   HWND hIsland;
   THROW_IF_FAILED(interop->get_WindowHandle(&hIsland));
   SetWindowPos(hIsland, 0, 0, 0, 0, 0, SWP_SHOWWINDOW);
@@ -255,8 +252,8 @@ void show_menu() {
   POINT pt;
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
   THROW_IF_WIN32_BOOL_FALSE(
-      SetWindowPos(hMenu, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
-  THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hMenu));
+      SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
+  THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hWnd));
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
       anchor);
 }
