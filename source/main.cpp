@@ -253,9 +253,10 @@ void show_menu() {
   THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
   THROW_IF_WIN32_BOOL_FALSE(
       SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
-  THROW_IF_WIN32_BOOL_FALSE(SetForegroundWindow(hWnd));
-  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
-      anchor);
+  if (SetForegroundWindow(hWnd)) {
+    Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
+        anchor);
+  }
 }
 
 std::optional<std::wstring> get_window_icon_uri(HWND wnd) {
