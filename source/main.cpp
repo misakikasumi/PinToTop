@@ -55,7 +55,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
   return main_loop();
 }
 
-int get_iconsm_metric() { return GetSystemMetrics(SM_CXSMICON); }
+int get_iconsm_metric() {
+  auto dpi{GetDpiForWindow(hWnd)};
+  return GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+}
 
 void load_resource() {
   THROW_LAST_ERROR_IF(
@@ -731,6 +734,9 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
           tray_return_focus();
         } catch (...) {
         }
+        break;
+      case WM_DPICHANGED:
+        init_tray(true);
         break;
       case WM_DESTROY:
         PostQuitMessage(0);

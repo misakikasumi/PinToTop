@@ -28,7 +28,7 @@
   </dependency>
   <asmv3:application>
     <asmv3:windowsSettings>
-      <ws3:dpiAwareness>system</ws3:dpiAwareness>
+      <ws3:dpiAwareness>PerMonitorV2</ws3:dpiAwareness>
     </asmv3:windowsSettings>
   </asmv3:application>
 </assembly>
