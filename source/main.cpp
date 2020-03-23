@@ -6,6 +6,7 @@ constexpr int MAX_LOADSTR = 260;
 constexpr UINT UM_TRAY = WM_USER + 1;
 constexpr UINT UM_THEMECHANGED = WM_USER + 2;
 constexpr UINT UM_SETMENUITEMICON = WM_USER + 3;
+constexpr UINT UM_MENU_CLOSED = WM_USER + 4;
 HINSTANCE hInst;
 HWND hWnd;
 WCHAR app_title[MAX_LOADSTR];
@@ -116,6 +117,13 @@ void destroy_tray() {
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_DELETE, &ncd));
 }
 
+void tray_return_focus() {
+  NOTIFYICONDATAW ncd{};
+  ncd.cbSize = sizeof(ncd);
+  ncd.hWnd = hWnd;
+  THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_SETFOCUS, &ncd));
+}
+
 void notify_error(UINT title_id, UINT info_id) {
   NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
@@ -138,8 +146,9 @@ void create_menu_flyout() {
                             FlyoutPlacementMode::TopEdgeAlignedLeft);
   Windows::UI::Xaml::Controls::Primitives::FlyoutBase::SetAttachedFlyout(
       anchor, menu_flyout);
-  menu_flyout.Closed(
-      [](const auto &, const auto &) { menu_flyout.Items().Clear(); });
+  menu_flyout.Closed([](const auto &, const auto &) {
+    SendNotifyMessageW(hWnd, UM_MENU_CLOSED, 0, 0);
+  });
 }
 
 void init_island() {
@@ -218,7 +227,12 @@ std::queue<std::pair<std::wstring, Windows::UI::Xaml::Controls::BitmapIcon>>
 std::condition_variable itcv;
 std::mutex itmutex;
 
-void show_menu() {
+void show_menu(int x, int y) {
+  THROW_IF_WIN32_BOOL_FALSE(
+      SetWindowPos(hWnd, HWND_TOPMOST, x, y, 0, 0, SWP_NOSIZE));
+  if (!SetForegroundWindow(hWnd)) {
+    return;
+  }
   WCHAR exit_str[MAX_LOADSTR];
   THROW_LAST_ERROR_IF(LoadStringW(hInst, IDS_EXIT, exit_str, MAX_LOADSTR) == 0);
   auto menu_items{menu_flyout.Items()};
@@ -249,14 +263,8 @@ void show_menu() {
   exit_item.Text(exit_str);
   exit_item.Click([](const auto &, const auto &) { DestroyWindow(hWnd); });
   menu_items.Append(exit_item);
-  POINT pt;
-  THROW_IF_WIN32_BOOL_FALSE(GetCursorPos(&pt));
-  THROW_IF_WIN32_BOOL_FALSE(
-      SetWindowPos(hWnd, HWND_TOPMOST, pt.x, pt.y, 0, 0, SWP_NOSIZE));
-  if (SetForegroundWindow(hWnd)) {
-    Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
-        anchor);
-  }
+  Windows::UI::Xaml::Controls::Primitives::FlyoutBase::ShowAttachedFlyout(
+      anchor);
 }
 
 std::optional<std::wstring> get_window_icon_uri(HWND wnd) {
@@ -682,7 +690,7 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         if ((lParam == WM_LBUTTONUP || lParam == WM_RBUTTONUP) &&
             !menu_showing) {
           menu_showing = true;
-          show_menu();
+          show_menu(GET_X_LPARAM(wParam), GET_Y_LPARAM(wParam));
           menu_showing = false;
         }
         break;
@@ -717,6 +725,13 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         }
         break;
       }
+      case UM_MENU_CLOSED:
+        menu_flyout.Items().Clear();
+        try {
+          tray_return_focus();
+        } catch (...) {
+        }
+        break;
       case WM_DESTROY:
         PostQuitMessage(0);
         destroy_tray();

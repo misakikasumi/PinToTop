@@ -12,6 +12,7 @@
 #include <string.h>
 #include <strsafe.h>
 #include <wincodec.h>
+#include <windowsx.h>
 #include <winreg.h>
 
 #ifdef GetCurrentTime
