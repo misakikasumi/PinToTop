@@ -56,7 +56,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 }
 
 int get_iconsm_metric() {
-  auto dpi{GetDpiForWindow(hWnd)};
+  auto dpi{GetDpiForSystem()};
   return GetSystemMetricsForDpi(SM_CXSMICON, dpi);
 }
 
