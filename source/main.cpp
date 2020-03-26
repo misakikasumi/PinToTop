@@ -224,8 +224,8 @@ bool is_window_topmost(HWND wnd) {
   return GetWindowLongW(wnd, GWL_EXSTYLE) & WS_EX_TOPMOST;
 }
 
-std::queue<std::pair<HWND, Windows::UI::Xaml::Controls::BitmapIcon>> itq;
-std::queue<std::pair<std::wstring, Windows::UI::Xaml::Controls::BitmapIcon>>
+std::queue<std::pair<HWND, Windows::UI::Xaml::Controls::MenuFlyoutItem>> itq;
+std::queue<std::pair<std::wstring, Windows::UI::Xaml::Controls::MenuFlyoutItem>>
     itbq;
 std::condition_variable itcv;
 std::mutex itmutex;
@@ -255,7 +255,7 @@ void show_menu(int x, int y) {
       item.Click([wnd](const auto &, const auto &) { toggle_top(wnd); });
       menu_items.Append(item);
 
-      itq.push({wnd, std::move(icon)});
+      itq.push({wnd, std::move(item)});
     }
     itcv.notify_one();
   }
@@ -308,11 +308,11 @@ void init_icon_thread() {
       itcv.wait(lck);
       while (!itq.empty()) {
         auto wnd{itq.front().first};
-        auto icon{std::move(itq.front().second)};
+        auto item{std::move(itq.front().second)};
         itq.pop();
         auto uri{get_window_icon_uri(wnd)};
         if (uri) {
-          itbq.push({std::move(*uri), std::move(icon)});
+          itbq.push({std::move(*uri), std::move(item)});
         }
       }
       THROW_IF_WIN32_BOOL_FALSE(
@@ -443,7 +443,7 @@ std::optional<std::wstring> get_uwp_icon_path(HWND wnd) {
       },
       LPARAM(&real_pid));
   if (real_pid == pid) {
-    return std::nullopt;
+    return L"";
   }
   p.reset(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, real_pid));
   THROW_LAST_ERROR_IF_NULL(p);
@@ -722,9 +722,24 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
         std::scoped_lock lck{itmutex};
         while (!itbq.empty()) {
           auto uri{std::move(itbq.front().first)};
-          auto icon{std::move(itbq.front().second)};
+          auto item{std::move(itbq.front().second)};
           itbq.pop();
-          icon.UriSource(Windows::Foundation::Uri(uri));
+          if (!uri.empty()) {
+            auto icon{
+                item.Icon().as<Windows::UI::Xaml::Controls::BitmapIcon>()};
+            icon.UriSource(Windows::Foundation::Uri(uri));
+          } else {
+            Windows::UI::Xaml::Controls::FontIcon icon;
+            icon.FontFamily(
+                Windows::UI::Xaml::Media::FontFamily(L"Segoe MDL2 Assets"));
+            icon.Glyph(L"\uE8BE");
+            Windows::UI::Color green;
+            green.R = green.B = 0;
+            green.G = 128;
+            green.A = 255;
+            icon.Foreground(Windows::UI::Xaml::Media::SolidColorBrush(green));
+            item.Icon(icon);
+          }
         }
         break;
       }
