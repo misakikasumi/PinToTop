@@ -120,13 +120,6 @@ void destroy_tray() {
   THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_DELETE, &ncd));
 }
 
-void tray_return_focus() {
-  NOTIFYICONDATAW ncd{};
-  ncd.cbSize = sizeof(ncd);
-  ncd.hWnd = hWnd;
-  THROW_IF_WIN32_BOOL_FALSE(Shell_NotifyIconW(NIM_SETFOCUS, &ncd));
-}
-
 void notify_error(UINT title_id, UINT info_id) {
   NOTIFYICONDATAW ncd{};
   ncd.cbSize = sizeof(ncd);
@@ -745,10 +738,6 @@ LRESULT CALLBACK WndProc(HWND thisHWnd, UINT message, WPARAM wParam,
       }
       case UM_MENU_CLOSED:
         menu_flyout.Items().Clear();
-        try {
-          tray_return_focus();
-        } catch (...) {
-        }
         break;
       case WM_DPICHANGED:
         init_tray(true);
