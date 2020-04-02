@@ -152,28 +152,6 @@ void create_menu_flyout() {
   menu_flyout.Closed([](const auto &, const auto &) {
     SendNotifyMessageW(hWnd, UM_MENU_CLOSED, 0, 0);
   });
-  Windows::UI::Xaml::Media::AcrylicBrush brush;
-  brush.BackgroundSource(
-      Windows::UI::Xaml::Media::AcrylicBackgroundSource::HostBackdrop);
-  Windows::UI::Color color, fallback_color;
-  if (apps_use_dark_theme) {
-    color.R = color.G = color.B = 0x1c;
-    color.A = 0xff;
-    fallback_color.R = fallback_color.G = fallback_color.B = 0x1f;
-    fallback_color.A = 0xff;
-  } else {
-    color.R = color.G = color.B = color.A = 0xff;
-    fallback_color.R = fallback_color.G = fallback_color.B = 0xe6;
-    fallback_color.A = 0xff;
-  }
-  brush.TintColor(color);
-  brush.FallbackColor(fallback_color);
-  brush.TintOpacity(0.6);
-  Windows::UI::Xaml::Style style{
-      xaml_typename<Windows::UI::Xaml::Controls::MenuFlyoutPresenter>()};
-  style.Setters().Append(Windows::UI::Xaml::Setter{
-      Windows::UI::Xaml::Controls::Control::BackgroundProperty(), brush});
-  menu_flyout.MenuFlyoutPresenterStyle(style);
 }
 
 void init_island() {
