@@ -69,8 +69,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     0,1,0,0
-PRODUCTVERSION  0,1,0,0
+FILEVERSION     0,1,1,0
+PRODUCTVERSION  0,1,1,0
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 FILEFLAGS       0
 FILEOS          VOS__WINDOWS32
@@ -82,12 +82,12 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName",      "Misaki Kasumi"
-            VALUE "FileDescription",  "An 'Always on Top' Utility for Windows"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileDescription",  "Pin To Top"
+            VALUE "FileVersion",      "0.1.1.0"
             VALUE "InternalName",     "PinToTop"
             VALUE "OriginalFilename", "PinToTop.exe"
             VALUE "ProductName",      "Pin To Top"
-            VALUE "ProductVersion",   "0.1.0"
+            VALUE "ProductVersion",   "0.1.1"
         END
     END
 
